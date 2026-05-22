@@ -1,16 +1,8 @@
-html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  box-sizing:border-box;
-}
 
 #song-swap-main {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 20px;
   /*padding: 20px;*/
 }
@@ -21,7 +13,15 @@ html, body {
   align-items: center;
   gap: 5px;
   flex: 1;
-  padding: 10px;
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: #f9f9f9;
+  
+}
+
+.song-cont-title {
+  margin-bottom: 0%;
 }
 
 .input-group {
@@ -40,17 +40,22 @@ html, body {
   font-size: 1rem;
   cursor: pointer;
 }
+.song-info {
+  text-align: center;
+}
 
 .album-art {
   width:30vw;
   height: 30vw;
+  max-width: 300px;
+  max-height: 300px;
   background-color: #aaa;
   border-radius: 8px;
+  object-fit: cover;
 }
 
 #screen {
-  height: 100vh;
-  width: 100vw;
+
   overflow: hidden;
 }
 
@@ -58,10 +63,10 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 3vh;
+  margin: 10px;
   /*border-bottom: 5vh;
   border-top: 5vh;*/
-  gap: 10px;
+  /*gap: 10px;*/
 }
 
 #main-title {
@@ -73,6 +78,133 @@ html, body {
 #logo {
   width: 5vw;
   height: 5vw;
+}
+
+#user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+#user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+#user-name {
+  font-size: 0.9rem;
+}
+
+#logout-btn {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+#login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 50vh;
+}
+
+#login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 260px;
+}
+
+#login-form input {
+  padding: 8px;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+#login-form button {
+  background-color: #1DB954;
+  color: white;
+  border: none;
+  padding: 10px;
+  font-size: 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+#login-error {
+  color: red;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+#duplicate-warning {
+  color: #e05;
+  font-size: 0.85rem;
+  margin: 4px 0 0;
+  text-align: center;
+}
+
+#history {
+  margin: 24px 10px 10px;
+}
+
+#history-title {
+  font-size: 1.1rem;
+  margin-bottom: 8px;
+  color: #555;
+}
+
+#history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f9f9f9;
+  border: 1px solid #eee;
+}
+
+.history-entry:hover {
+  background: #f0f0f0;
+}
+
+.history-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.history-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.history-song {
+  font-weight: bold;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-meta {
+  font-size: 0.8rem;
+  color: #777;
 }
 
 
