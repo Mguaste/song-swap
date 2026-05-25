@@ -18,6 +18,7 @@ function LoginForm({ onLogin }) {
       credentials: 'include',
       body: JSON.stringify({ name, password }),
     });
+
     if (res.ok) {
       onLogin(await res.json());
     } else {
@@ -89,6 +90,7 @@ function App() {
       const response = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ link: spotifyLink }),
       });
       const data = await response.json();
