@@ -166,6 +166,12 @@ app.delete('/api/admin/history', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
+app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
+  currentSong = null;
+  io.emit('song-cleared');
+  res.json({ success: true });
+});
+
 const DIST = path.join(__dirname, '../dist');
 if (fs.existsSync(DIST)) {
   app.use(express.static(DIST));

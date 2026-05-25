@@ -159,7 +159,7 @@
   font-size: 1.1rem;
 }
 
-#clear-history-btn {
+#clear-history-btn, #clear-song-btn {
   background: #e00;
   color: white;
   border: none;
@@ -167,6 +167,7 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
+  margin-right: 8px;
 }
 
 #login-error {
