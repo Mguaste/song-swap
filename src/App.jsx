@@ -113,6 +113,10 @@ function App() {
     setHistory([]);
   };
 
+  const clearCurrentSong = async () => {
+    await fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' });
+  };
+
   const openInSpotify = (song) => {
     if (!song) return;
     window.location.href = song.spotifyUri;
@@ -202,6 +206,7 @@ function App() {
           <div id="admin-panel">
             <h2 id="admin-title">Admin</h2>
             <button id="clear-history-btn" onClick={clearHistory}>Clear All History</button>
+            <button id="clear-song-btn" onClick={clearCurrentSong}>Clear Current Song</button>
           </div>
         )}
 
