@@ -26,14 +26,20 @@ let songHistory = loadHistory();
 
 const app = express();
 const server = http.createServer(app);
+const ALLOWED_ORIGINS = [
+  /^http:\/\/localhost(:\d+)?$/,
+  'https://song-swap.app',
+  'https://www.song-swap.app',
+];
+
 const io = new Server(server, {
   cors: {
-    origin: /^http:\/\/localhost(:\d+)?$/,
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
     credentials: true,
   },
 });
-const PORT = 5050;
+const PORT = process.env.PORT || 5050;
 
 let currentSong = null;
 
@@ -51,13 +57,13 @@ const scheduleMidnightClear = () => {
 };
 
 //middleware
-app.use(cors({ origin: /^http:\/\/localhost(:\d+)?$/, credentials: true }));
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(bodyParser.json());
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false },
+  cookie: { secure: process.env.NODE_ENV === 'production', sameSite: 'lax' },
 }));
 
 io.on('connection', (socket) => {
@@ -141,10 +147,11 @@ app.get('/api/history', requireAuth, (req, res) => {
   res.json(songHistory);
 });
 
-app.get('/test', (req, res) => {
-  console.log('Test route hit');
-  res.json({ message: 'Express is working' });
-});
+const DIST = path.join(__dirname, '../dist');
+if (fs.existsSync(DIST)) {
+  app.use(express.static(DIST));
+  app.get('*', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
+}
 
 // Example route to verify Spotify link
 app.post('/api/verify', requireAuth, async (req, res) => {
