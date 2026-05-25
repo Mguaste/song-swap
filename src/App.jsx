@@ -45,6 +45,7 @@ function App() {
   const [receivedSong, setReceivedSong] = useState(null);
   const [history, setHistory] = useState([]);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
 
   useEffect(() => {
     fetch('/api/me', { credentials: 'include' })
@@ -63,6 +64,11 @@ function App() {
     fetch('/api/history', { credentials: 'include' })
       .then(r => r.json())
       .then(data => setHistory(data.slice().reverse()));
+    if (user.name === 'Mguaste') {
+      fetch('/api/spotify-status', { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => setSpotifyConnected(data.connected));
+    }
   }, [user]);
 
   useEffect(() => {
@@ -207,6 +213,11 @@ function App() {
             <h2 id="admin-title">Admin</h2>
             <button id="clear-history-btn" onClick={clearHistory}>Clear All History</button>
             <button id="clear-song-btn" onClick={clearCurrentSong}>Clear Current Song</button>
+            <a href="/api/spotify-auth">
+              <button id="spotify-connect-btn">
+                {spotifyConnected ? 'Spotify Connected ✓' : 'Connect Spotify'}
+              </button>
+            </a>
           </div>
         )}
 
