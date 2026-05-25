@@ -150,7 +150,7 @@ app.get('/api/history', requireAuth, (req, res) => {
 const DIST = path.join(__dirname, '../dist');
 if (fs.existsSync(DIST)) {
   app.use(express.static(DIST));
-  app.get('*', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
+  app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
 // Example route to verify Spotify link
