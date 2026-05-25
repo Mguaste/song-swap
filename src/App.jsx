@@ -5,6 +5,16 @@ import icon from './assets/SSLogo.png'
 
 const socket = io();
 
+function AlbumArtPlaceholder() {
+  return (
+    <div className="album-art album-art-placeholder">
+      <svg viewBox="0 0 24 24" fill="#bbb" width="40%" height="40%">
+        <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+      </svg>
+    </div>
+  );
+}
+
 function LoginForm({ onLogin }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -166,11 +176,10 @@ function App() {
           <div className="song-cont">
             <h2 className="song-cont-title">Send</h2>
               <div className="song-info" onClick={() => openInSpotify(songDetails)} style={songDetails ? {cursor: 'pointer'} : {}}>
-                <img
-                  className="album-art"
-                  src={songDetails ? songDetails.albumArt : 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='}
-                  alt="Album Art"
-                />
+                {songDetails
+                  ? <img className="album-art" src={songDetails.albumArt} alt="Album Art" />
+                  : <AlbumArtPlaceholder />
+                }
                 <h3>{songDetails ? songDetails.title : 'Song Title'}</h3>
                 <p>Artist: {songDetails ? songDetails.artist : 'Artist Name'}</p>
                 <p>Album: {songDetails ? songDetails.album: 'Album Name'}</p>
@@ -197,11 +206,10 @@ function App() {
           <div className="song-cont">
             <h2 className="song-cont-title">Recieve</h2>
             <div className="song-info" onClick={() => openInSpotify(receivedSong)} style={receivedSong ? {cursor: 'pointer'} : {}}>
-              <img
-                className="album-art"
-                src={receivedSong ? receivedSong.albumArt : 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='}
-                alt="Album Art"
-              />
+              {receivedSong
+                ? <img className="album-art" src={receivedSong.albumArt} alt="Album Art" />
+                : <AlbumArtPlaceholder />
+              }
               <h3>{receivedSong ? receivedSong.title : 'Song Title'}</h3>
               <p>Artist: {receivedSong ? receivedSong.artist : 'Artist Name'}</p>
               <p>Album: {receivedSong ? receivedSong.album : 'Album Name'}</p>

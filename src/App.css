@@ -44,6 +44,13 @@
   text-align: center;
 }
 
+.album-art-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #aaa;
+}
+
 .album-art {
   width:30vw;
   height: 30vw;
