@@ -120,6 +120,11 @@ const requireAuth = (req, res, next) => {
   res.status(401).json({ error: 'Not authenticated' });
 };
 
+const requireAdmin = (req, res, next) => {
+  if (req.session.user?.name === 'Mguaste') return next();
+  res.status(403).json({ error: 'Forbidden' });
+};
+
 const USERS = [
   { name: process.env.USER1_NAME, password: process.env.USER1_PASSWORD },
   { name: process.env.USER2_NAME, password: process.env.USER2_PASSWORD },
@@ -145,6 +150,15 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/history', requireAuth, (req, res) => {
   res.json(songHistory);
+});
+
+app.delete('/api/admin/history', requireAdmin, (req, res) => {
+  songHistory = [];
+  currentSong = null;
+  saveHistory(songHistory);
+  io.emit('song-cleared');
+  io.emit('history-updated', null);
+  res.json({ success: true });
 });
 
 const DIST = path.join(__dirname, '../dist');

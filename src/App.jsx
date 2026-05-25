@@ -43,6 +43,7 @@ function App() {
   const [songDetails, setSongDetials] = useState(null);
   const [receivedSong, setReceivedSong] = useState(null);
   const [history, setHistory] = useState([]);
+  const [showAdmin, setShowAdmin] = useState(false);
 
   useEffect(() => {
     fetch('/api/me', { credentials: 'include' })
@@ -105,6 +106,11 @@ function App() {
     setTimeout(() => setSent(false), 1500);
   };
 
+  const clearHistory = async () => {
+    await fetch('/api/admin/history', { method: 'DELETE', credentials: 'include' });
+    setHistory([]);
+  };
+
   const openInSpotify = (song) => {
     if (!song) return;
     window.location.href = song.spotifyUri;
@@ -136,6 +142,9 @@ function App() {
         <div id="user-info">
           {user.avatar && <img src={user.avatar} id="user-avatar" alt="avatar" />}
           <span id="user-name">{user.name}</span>
+          {user.name === 'Mguaste' && (
+            <button id="admin-btn" onClick={() => setShowAdmin(v => !v)}>Admin</button>
+          )}
           <button id="logout-btn" onClick={() => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(() => setUser(null))}>Logout</button>
         </div>
       </header>
@@ -187,6 +196,13 @@ function App() {
             </div>
           </div>
         </div>
+        {showAdmin && (
+          <div id="admin-panel">
+            <h2 id="admin-title">Admin</h2>
+            <button id="clear-history-btn" onClick={clearHistory}>Clear All History</button>
+          </div>
+        )}
+
         {history.length > 0 && (
           <div id="history">
             <h2 id="history-title">History</h2>

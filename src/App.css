@@ -136,6 +136,39 @@
   font-weight: bold;
 }
 
+#admin-btn {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  background: #333;
+  color: white;
+  border: none;
+  border-radius: 4px;
+}
+
+#admin-panel {
+  margin: 16px 10px;
+  padding: 16px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+#admin-title {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+#clear-history-btn {
+  background: #e00;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
 #login-error {
   color: red;
   font-size: 0.85rem;
