@@ -25,6 +25,7 @@ const saveHistory = (history) => {
 let songHistory = loadHistory();
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const ALLOWED_ORIGINS = [
   /^http:\/\/localhost(:\d+)?$/,
