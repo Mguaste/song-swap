@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const HISTORY_FILE = path.join(__dirname, 'history.json');
+const HISTORY_FILE = process.env.HISTORY_PATH || path.join(__dirname, 'history.json');
 
 const loadHistory = () => {
   try {
