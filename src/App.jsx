@@ -143,16 +143,13 @@ function App() {
   if (user === undefined) return null;
 
   if (!user) return (
-    <div id="screen">
-      <header id="title-card">
-        <img src={icon} id="logo" alt='icon' />
-        <h1 id="main-title">Song Swap</h1>
-      </header>
-      <main id="main-body">
-        <div id="login-container">
-          <LoginForm onLogin={setUser} />
-        </div>
-      </main>
+    <div id="login-page">
+      <div id="login-card">
+        <img src={icon} id="login-logo" alt="icon" />
+        <h1 id="login-title">Song Swap</h1>
+        <p id="login-subtitle">share the music</p>
+        <LoginForm onLogin={setUser} />
+      </div>
     </div>
   );
 
@@ -234,11 +231,12 @@ function App() {
             <h2 id="history-title">History</h2>
             <div id="history-list">
               {history.map((entry, i) => (
-                <div key={i} className="history-entry" onClick={() => openInSpotify(entry)} style={{cursor: 'pointer'}}>
+                <div key={i} className="history-entry" onClick={() => openInSpotify(entry)}>
+                  <span className="history-index">{history.length - i}</span>
                   <img src={entry.albumArt} alt="art" className="history-art" />
                   <div className="history-info">
                     <span className="history-song">{entry.title}</span>
-                    <span className="history-meta">{entry.artist} · sent by {entry.sentBy} · {new Date(entry.sentAt).toLocaleDateString()}</span>
+                    <span className="history-meta">{entry.artist} · {entry.sentBy} · {new Date(entry.sentAt).toLocaleDateString()}</span>
                   </div>
                 </div>
               ))}
