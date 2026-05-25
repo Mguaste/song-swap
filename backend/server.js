@@ -9,20 +9,61 @@ const path = require('path');
 require('dotenv').config();
 
 const HISTORY_FILE = process.env.HISTORY_PATH || path.join(__dirname, 'history.json');
+const TOKEN_FILE = process.env.HISTORY_PATH
+  ? path.join(path.dirname(process.env.HISTORY_PATH), 'spotify-tokens.json')
+  : path.join(__dirname, 'spotify-tokens.json');
 
 const loadHistory = () => {
-  try {
-    return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { return []; }
 };
 
 const saveHistory = (history) => {
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
 };
 
+const loadTokens = () => {
+  try { return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')); } catch { return null; }
+};
+
+const saveTokens = (tokens) => {
+  fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
+};
+
 let songHistory = loadHistory();
+
+const getPlaylistAccessToken = async () => {
+  const tokens = loadTokens();
+  if (!tokens?.refresh_token) return null;
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
+    },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token }),
+  });
+  const data = await res.json();
+  if (data.refresh_token) saveTokens({ ...tokens, refresh_token: data.refresh_token });
+  return data.access_token;
+};
+
+const addToPlaylist = async (spotifyUri) => {
+  const playlistId = process.env.SPOTIFY_PLAYLIST_ID;
+  if (!playlistId) return;
+  const accessToken = await getPlaylistAccessToken();
+  if (!accessToken) return;
+  const checkRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const checkData = await checkRes.json();
+  const alreadyIn = checkData.items?.some(item => item.track?.uri === spotifyUri);
+  if (alreadyIn) return;
+  await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uris: [spotifyUri] }),
+  });
+};
 
 const app = express();
 app.set('trust proxy', 1);
@@ -86,6 +127,7 @@ io.on('connection', (socket) => {
     currentSong = song;
     socket.broadcast.emit('song-received', song);
     io.emit('history-updated', entry);
+    addToPlaylist(song.spotifyUri).catch(err => console.error('Playlist add failed:', err));
   });
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
 });
@@ -164,6 +206,44 @@ app.delete('/api/admin/history', requireAdmin, (req, res) => {
   io.emit('song-cleared');
   io.emit('history-updated', null);
   res.json({ success: true });
+});
+
+app.get('/api/spotify-auth', requireAdmin, (req, res) => {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: process.env.SPOTIFY_CLIENT_ID,
+    scope: 'playlist-modify-public playlist-modify-private',
+    redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+  });
+  res.redirect(`https://accounts.spotify.com/authorize?${params}`);
+});
+
+app.get('/api/spotify-callback', async (req, res) => {
+  const code = req.query.code;
+  const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
+    },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+    }),
+  });
+  const tokens = await tokenRes.json();
+  if (tokens.refresh_token) {
+    saveTokens({ refresh_token: tokens.refresh_token });
+    res.redirect('/?spotify=connected');
+  } else {
+    res.status(500).send('Failed to get Spotify token');
+  }
+});
+
+app.get('/api/spotify-status', requireAdmin, (req, res) => {
+  const tokens = loadTokens();
+  res.json({ connected: !!tokens?.refresh_token });
 });
 
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
