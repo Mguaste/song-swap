@@ -39,6 +39,9 @@
 /* ── Song Info ── */
 
 .song-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   width: 100%;
 }
@@ -142,6 +145,29 @@ img.album-art {
 .input-group button:active {
   transform: translateY(0);
   filter: brightness(0.95);
+}
+
+.input-group button.btn-sent {
+  animation: sentPop 0.2s ease;
+}
+
+.checkmark-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: drawCheck 0.4s ease 0.05s forwards;
+}
+
+@keyframes drawCheck {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes sentPop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
 }
 
 /* ── Screen ── */
