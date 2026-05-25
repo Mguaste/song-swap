@@ -55,8 +55,11 @@
 }
 
 #screen {
-
   overflow: hidden;
+}
+
+#main-body {
+  padding: 0 10px 20px;
 }
 
 #title-card {
@@ -249,6 +252,64 @@
 .history-meta {
   font-size: 0.8rem;
   color: #777;
+}
+
+@media (max-width: 600px) {
+  #song-swap-main {
+    flex-direction: column;
+  }
+
+  .album-art {
+    width: 60vw;
+    height: 60vw;
+  }
+
+  #main-title {
+    font-size: 8vw;
+  }
+
+  #logo {
+    width: 8vw;
+    height: 8vw;
+  }
+
+  #title-card {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  #user-info {
+    font-size: 0.8rem;
+    gap: 6px;
+  }
+
+  #user-name {
+    display: none;
+  }
+
+  .input-group {
+    width: 100%;
+  }
+
+  .input-group input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  #admin-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #clear-history-btn, #clear-song-btn {
+    margin-right: 0;
+    width: 100%;
+  }
+
+  #spotify-connect-btn {
+    width: 100%;
+  }
 }
 
 
