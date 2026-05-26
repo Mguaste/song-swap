@@ -309,7 +309,7 @@ img.album-art {
 
 /* ── Standalone Buttons ── */
 
-#logout-btn {
+#logout-btn, #clear-btn {
   font-size: 0.78rem;
   font-family: inherit;
   font-weight: 500;
@@ -322,7 +322,7 @@ img.album-art {
   transition: border-color 0.15s, color 0.15s;
 }
 
-#logout-btn:hover {
+#logout-btn:hover, #clear-btn:hover {
   border-color: #fff;
   color: #fff;
 }
