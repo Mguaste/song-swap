@@ -173,10 +173,19 @@ function App() {
           <div className="song-cont">
             <h2 className="song-cont-title">Send</h2>
               <div className="song-info" onClick={() => openInSpotify(songDetails)} style={songDetails ? {cursor: 'pointer'} : {}}>
-                {songDetails
-                  ? <img className="album-art" src={songDetails.albumArt} alt="Album Art" />
-                  : <AlbumArtPlaceholder />
-                }
+                <div className={`send-art-wrapper${sent ? ' sending' : ''}`}>
+                  <div className="send-art-inner">
+                    {songDetails
+                      ? <img className="album-art" src={songDetails.albumArt} alt="Album Art" />
+                      : <AlbumArtPlaceholder />
+                    }
+                  </div>
+                  <div className="send-art-check">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="40%" height="40%">
+                      <polyline points="4 12 9 17 20 6" />
+                    </svg>
+                  </div>
+                </div>
                 <h3>{songDetails ? songDetails.title : 'Song Title'}</h3>
                 <p>Artist: {songDetails ? songDetails.artist : 'Artist Name'}</p>
                 <p>Album: {songDetails ? songDetails.album: 'Album Name'}</p>
@@ -188,12 +197,8 @@ function App() {
                 onChange={(e) => { setSpotifyLink(e.target.value); setSongDetials(null); setDuplicate(null); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') songDetails ? sendSong() : verifySong(); }}
               />
-              <button onClick={songDetails ? sendSong : verifySong} className={sent ? 'btn-sent' : ''}>
-                {sent ? (
-                  <svg className="checkmark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="4 12 9 17 20 6" />
-                  </svg>
-                ) : songDetails ? 'Send' : 'Verify'}
+              <button onClick={songDetails ? sendSong : verifySong} disabled={sent}>
+                {songDetails ? 'Send' : 'Verify'}
               </button>
             </div>
             {duplicate && (
