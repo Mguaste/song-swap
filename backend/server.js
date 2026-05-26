@@ -128,6 +128,7 @@ io.on('connection', (socket) => {
     saveHistory(songHistory);
     currentSong = song;
     currentSongSentBy = sentBy;
+    socket.emit('send-success');
     socket.broadcast.emit('song-received', song);
     io.emit('history-updated', entry);
     addToPlaylist(song.spotifyUri).catch(err => console.error('Playlist add failed:', err));

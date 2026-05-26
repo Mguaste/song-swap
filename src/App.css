@@ -185,6 +185,16 @@ img.album-art {
   transform: translateY(110%);
 }
 
+.send-art-deny {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #c0392b;
+  transform: translateY(110%);
+}
+
 .send-art-wrapper.sending .send-art-inner {
   animation: artSend 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
@@ -197,6 +207,20 @@ img.album-art {
   stroke-dasharray: 24;
   stroke-dashoffset: 24;
   animation: drawCheck 0.3s ease 0.5s forwards;
+}
+
+.send-art-wrapper.denied .send-art-inner {
+  animation: artSend 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.send-art-wrapper.denied .send-art-deny {
+  animation: checkSend 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.send-art-wrapper.denied .send-art-deny svg line {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 18;
+  animation: drawCheck 0.2s ease 0.5s forwards;
 }
 
 @keyframes artSend {

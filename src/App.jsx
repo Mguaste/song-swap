@@ -50,6 +50,7 @@ function App() {
   const [user, setUser] = useState(undefined);
   const [spotifyLink, setSpotifyLink] = useState('');
   const [sent, setSent] = useState(false);
+  const [denied, setDenied] = useState(false);
   const [duplicate, setDuplicate] = useState(null);
   const [songDetails, setSongDetials] = useState(null);
   const [receivedSong, setReceivedSong] = useState(null);
@@ -87,12 +88,14 @@ function App() {
   useEffect(() => {
     socket.on('song-received', (song) => setReceivedSong(song));
     socket.on('song-cleared', () => { setReceivedSong(null); setSongDetials(null); });
-    socket.on('duplicate-song', (entry) => setDuplicate(entry));
+    socket.on('send-success', () => { setSent(true); setTimeout(() => setSent(false), 1500); });
+    socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('history-updated', (entry) => setHistory(prev => [entry, ...prev]));
     socket.on('history-cleared', () => setHistory([]));
     return () => {
       socket.off('song-received');
       socket.off('song-cleared');
+      socket.off('send-success');
       socket.off('duplicate-song');
       socket.off('history-updated');
       socket.off('history-cleared');
@@ -125,8 +128,6 @@ function App() {
     if (!songDetails) return;
     setDuplicate(null);
     socket.emit('send-song', { song: songDetails, sentBy: user.name });
-    setSent(true);
-    setTimeout(() => setSent(false), 1500);
   };
 
   const clearHistory = async () => {
@@ -178,7 +179,7 @@ function App() {
           <div className="song-cont">
             <h2 className="song-cont-title">Send</h2>
               <div className="song-info" onClick={() => openInSpotify(songDetails)} style={songDetails ? {cursor: 'pointer'} : {}}>
-                <div className={`send-art-wrapper${sent ? ' sending' : ''}`}>
+                <div className={`send-art-wrapper${sent ? ' sending' : ''}${denied ? ' denied' : ''}`}>
                   <div className="send-art-inner">
                     {songDetails
                       ? <img className="album-art" src={songDetails.albumArt} alt="Album Art" />
@@ -188,6 +189,12 @@ function App() {
                   <div className="send-art-check">
                     <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="40%" height="40%">
                       <polyline points="4 12 9 17 20 6" />
+                    </svg>
+                  </div>
+                  <div className="send-art-deny">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="40%" height="40%">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
                   </div>
                 </div>
@@ -202,7 +209,7 @@ function App() {
                 onChange={(e) => { setSpotifyLink(e.target.value); setSongDetials(null); setDuplicate(null); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') songDetails ? sendSong() : verifySong(); }}
               />
-              <button onClick={songDetails ? sendSong : verifySong} disabled={sent}>
+              <button onClick={songDetails ? sendSong : verifySong} disabled={sent || denied}>
                 {songDetails ? 'Send' : 'Verify'}
               </button>
             </div>
