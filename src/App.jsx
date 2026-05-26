@@ -76,7 +76,7 @@ function App() {
       .then(data => setHistory(data.slice().reverse()));
     fetch('/api/current-song', { credentials: 'include' })
       .then(r => r.json())
-      .then(song => { if (song) setReceivedSong(song); });
+      .then(song => { if (song && song.sentBy !== user.name) setReceivedSong(song); });
     if (user.name === 'Mguaste') {
       fetch('/api/spotify-status', { credentials: 'include' })
         .then(r => r.json())

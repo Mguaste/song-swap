@@ -84,6 +84,7 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 5050;
 
 let currentSong = null;
+let currentSongSentBy = null;
 
 const scheduleMidnightClear = () => {
   const now = new Date();
@@ -92,6 +93,7 @@ const scheduleMidnightClear = () => {
   const msUntilMidnight = midnight - now;
   setTimeout(() => {
     currentSong = null;
+    currentSongSentBy = null;
     io.emit('song-cleared');
     console.log('Song cleared at midnight');
     scheduleMidnightClear();
@@ -125,6 +127,7 @@ io.on('connection', (socket) => {
     songHistory.push(entry);
     saveHistory(songHistory);
     currentSong = song;
+    currentSongSentBy = sentBy;
     socket.broadcast.emit('song-received', song);
     io.emit('history-updated', entry);
     addToPlaylist(song.spotifyUri).catch(err => console.error('Playlist add failed:', err));
@@ -202,6 +205,7 @@ app.get('/api/history', requireAuth, (req, res) => {
 app.delete('/api/admin/history', requireAdmin, (req, res) => {
   songHistory = [];
   currentSong = null;
+  currentSongSentBy = null;
   saveHistory(songHistory);
   io.emit('song-cleared');
   io.emit('history-cleared');
@@ -247,11 +251,13 @@ app.get('/api/spotify-status', requireAdmin, (req, res) => {
 });
 
 app.get('/api/current-song', requireAuth, (req, res) => {
-  res.json(currentSong || null);
+  if (!currentSong) return res.json(null);
+  res.json({ ...currentSong, sentBy: currentSongSentBy });
 });
 
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
   currentSong = null;
+  currentSongSentBy = null;
   io.emit('song-cleared');
   res.json({ success: true });
 });
