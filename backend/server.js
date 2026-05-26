@@ -204,7 +204,7 @@ app.delete('/api/admin/history', requireAdmin, (req, res) => {
   currentSong = null;
   saveHistory(songHistory);
   io.emit('song-cleared');
-  io.emit('history-updated', null);
+  io.emit('history-cleared');
   res.json({ success: true });
 });
 

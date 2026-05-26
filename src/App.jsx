@@ -86,11 +86,13 @@ function App() {
     socket.on('song-cleared', () => { setReceivedSong(null); setSongDetials(null); });
     socket.on('duplicate-song', (entry) => setDuplicate(entry));
     socket.on('history-updated', (entry) => setHistory(prev => [entry, ...prev]));
+    socket.on('history-cleared', () => setHistory([]));
     return () => {
       socket.off('song-received');
       socket.off('song-cleared');
       socket.off('duplicate-song');
       socket.off('history-updated');
+      socket.off('history-cleared');
     };
   }, []);
 
@@ -147,7 +149,7 @@ function App() {
       <div id="login-card">
         <img src={icon} id="login-logo" alt="icon" />
         <h1 id="login-title">Song Swap</h1>
-        <p id="login-subtitle">share the music</p>
+        <p id="login-subtitle">Community in Music</p>
         <LoginForm onLogin={setUser} />
       </div>
     </div>
