@@ -246,6 +246,10 @@ app.get('/api/spotify-status', requireAdmin, (req, res) => {
   res.json({ connected: !!tokens?.refresh_token });
 });
 
+app.get('/api/current-song', requireAuth, (req, res) => {
+  res.json(currentSong || null);
+});
+
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
   currentSong = null;
   io.emit('song-cleared');

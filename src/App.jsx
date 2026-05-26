@@ -60,20 +60,23 @@ function App() {
   useEffect(() => {
     fetch('/api/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        setUser(data);
-        if (data) {
-          const saved = localStorage.getItem(`lastSentSong_${data.name}`);
-          if (saved) setSongDetials(JSON.parse(saved));
-        }
-      });
+      .then(data => setUser(data));
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (user === undefined) return;
+    if (!user) {
+      setSongDetials(null);
+      return;
+    }
+    const saved = localStorage.getItem(`lastSentSong_${user.name}`);
+    setSongDetials(saved ? JSON.parse(saved) : null);
     fetch('/api/history', { credentials: 'include' })
       .then(r => r.json())
       .then(data => setHistory(data.slice().reverse()));
+    fetch('/api/current-song', { credentials: 'include' })
+      .then(r => r.json())
+      .then(song => { if (song) setReceivedSong(song); });
     if (user.name === 'Mguaste') {
       fetch('/api/spotify-status', { credentials: 'include' })
         .then(r => r.json())
