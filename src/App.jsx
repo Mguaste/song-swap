@@ -87,7 +87,7 @@ function App() {
 
   useEffect(() => {
     socket.on('song-received', (song) => setReceivedSong(song));
-    socket.on('song-cleared', () => { setReceivedSong(null); setSongDetials(null); });
+    socket.on('song-cleared', () => setReceivedSong(null));
     socket.on('send-success', () => { setSent(true); setTimeout(() => setSent(false), 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('history-updated', (entry) => setHistory(prev => [entry, ...prev]));

@@ -83,8 +83,13 @@ const io = new Server(server, {
 });
 const PORT = process.env.PORT || 5050;
 
-let currentSong = null;
-let currentSongSentBy = null;
+// Track the last song sent by each user, rebuilt from history on startup
+const lastSentBy = {};
+for (const entry of songHistory) {
+  lastSentBy[entry.sentBy] = entry;
+}
+
+const clearLastSent = () => { for (const k of Object.keys(lastSentBy)) delete lastSentBy[k]; };
 
 const scheduleMidnightClear = () => {
   const now = new Date();
@@ -92,8 +97,7 @@ const scheduleMidnightClear = () => {
   midnight.setHours(24, 0, 0, 0);
   const msUntilMidnight = midnight - now;
   setTimeout(() => {
-    currentSong = null;
-    currentSongSentBy = null;
+    clearLastSent();
     io.emit('song-cleared');
     console.log('Song cleared at midnight');
     scheduleMidnightClear();
@@ -116,7 +120,6 @@ app.use(session({
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
-  if (currentSong) socket.emit('song-received', currentSong);
   socket.on('send-song', ({ song, sentBy }) => {
     const duplicate = songHistory.find(e => e.spotifyUri === song.spotifyUri);
     if (duplicate) {
@@ -126,8 +129,7 @@ io.on('connection', (socket) => {
     const entry = { ...song, sentBy, sentAt: new Date().toISOString() };
     songHistory.push(entry);
     saveHistory(songHistory);
-    currentSong = song;
-    currentSongSentBy = sentBy;
+    lastSentBy[sentBy] = entry;
     socket.emit('send-success');
     socket.broadcast.emit('song-received', song);
     io.emit('history-updated', entry);
@@ -205,8 +207,7 @@ app.get('/api/history', requireAuth, (req, res) => {
 
 app.delete('/api/admin/history', requireAdmin, (req, res) => {
   songHistory = [];
-  currentSong = null;
-  currentSongSentBy = null;
+  clearLastSent();
   saveHistory(songHistory);
   io.emit('song-cleared');
   io.emit('history-cleared');
@@ -252,13 +253,13 @@ app.get('/api/spotify-status', requireAdmin, (req, res) => {
 });
 
 app.get('/api/current-song', requireAuth, (req, res) => {
-  if (!currentSong) return res.json(null);
-  res.json({ ...currentSong, sentBy: currentSongSentBy });
+  const myName = req.session.user.name;
+  const other = Object.values(lastSentBy).find(e => e.sentBy !== myName);
+  res.json(other || null);
 });
 
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
-  currentSong = null;
-  currentSongSentBy = null;
+  clearLastSent();
   io.emit('song-cleared');
   res.json({ success: true });
 });
