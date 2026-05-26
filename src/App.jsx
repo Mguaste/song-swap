@@ -88,6 +88,7 @@ function App() {
   useEffect(() => {
     socket.on('song-received', (song) => setReceivedSong(song));
     socket.on('song-cleared', () => setReceivedSong(null));
+    socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetials(null); });
     socket.on('send-success', () => { setSent(true); setTimeout(() => setSent(false), 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('history-updated', (entry) => setHistory(prev => [entry, ...prev]));
@@ -95,6 +96,7 @@ function App() {
     return () => {
       socket.off('song-received');
       socket.off('song-cleared');
+      socket.off('all-songs-cleared');
       socket.off('send-success');
       socket.off('duplicate-song');
       socket.off('history-updated');
@@ -139,6 +141,11 @@ function App() {
     await fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' });
   };
 
+  const clearSongs = () => {
+    setSongDetials(null);
+    setReceivedSong(null);
+  };
+
   const openInSpotify = (song) => {
     if (!song) return;
     window.location.href = song.spotifyUri;
@@ -170,6 +177,7 @@ function App() {
           {user.name === 'Mguaste' && (
             <button id="admin-btn" onClick={() => setShowAdmin(v => !v)}>Admin</button>
           )}
+          <button id="clear-btn" onClick={clearSongs}>Clear</button>
           <button id="logout-btn" onClick={() => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(() => setUser(null))}>Logout</button>
         </div>
       </header>

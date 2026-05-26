@@ -252,6 +252,12 @@ app.get('/api/spotify-status', requireAdmin, (req, res) => {
   res.json({ connected: !!tokens?.refresh_token });
 });
 
+app.delete('/api/current-songs', requireAuth, (req, res) => {
+  clearLastSent();
+  io.emit('all-songs-cleared');
+  res.json({ success: true });
+});
+
 app.get('/api/current-song', requireAuth, (req, res) => {
   const myName = req.session.user.name;
   const other = Object.values(lastSentBy).find(e => e.sentBy !== myName);
@@ -260,7 +266,7 @@ app.get('/api/current-song', requireAuth, (req, res) => {
 
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
   clearLastSent();
-  io.emit('song-cleared');
+  io.emit('all-songs-cleared');
   res.json({ success: true });
 });
 
