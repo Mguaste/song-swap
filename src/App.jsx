@@ -1,5 +1,5 @@
 import './App.css'
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import icon from './assets/SSLogo.png'
 
@@ -81,6 +81,7 @@ function App() {
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [activeFriendship, setActiveFriendship] = useState(null);
+  const activeFriendshipRef = useRef(null);
   const [addCodeInput, setAddCodeInput] = useState('');
   const [addCodeError, setAddCodeError] = useState('');
   const [addCodeSuccess, setAddCodeSuccess] = useState('');
@@ -128,12 +129,16 @@ function App() {
   }, [user]);
 
   useEffect(() => {
-    socket.on('song-received', (song) => setReceivedSong(song));
+    socket.on('song-received', (song) => {
+      if (song.friendshipId === activeFriendshipRef.current?.friendship_id) setReceivedSong(song);
+    });
     socket.on('song-cleared', () => setReceivedSong(null));
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
     socket.on('send-success', () => { setSent(true); setTimeout(() => setSent(false), 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
-    socket.on('history-updated', (entry) => setHistory(prev => [entry, ...prev]));
+    socket.on('history-updated', (entry) => {
+      if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) setHistory(prev => [entry, ...prev]);
+    });
     socket.on('history-cleared', () => setHistory([]));
     return () => {
       socket.off('song-received');
@@ -148,6 +153,7 @@ function App() {
 
   const selectFriend = async (friendship) => {
     setActiveFriendship(friendship);
+    activeFriendshipRef.current = friendship;
     setSpotifyLink('');
     setSongDetails(null);
     setDuplicate(null);
