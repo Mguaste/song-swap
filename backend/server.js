@@ -202,7 +202,7 @@ io.on('connection', (socket) => {
     if (!lastSentByFriendship[friendshipId]) lastSentByFriendship[friendshipId] = {};
     lastSentByFriendship[friendshipId][sentBy] = entry;
     socket.emit('send-success');
-    socket.to(`friendship-${friendshipId}`).emit('song-received', song);
+    socket.to(`friendship-${friendshipId}`).emit('song-received', { ...song, friendshipId });
     io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
     addToPlaylist(song.spotifyUri).catch(err => console.error('Playlist add failed:', err));
   });
