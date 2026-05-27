@@ -7,7 +7,10 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
+const { Pool } = require('pg');
 require('dotenv').config();
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
 const HISTORY_FILE = process.env.HISTORY_PATH || path.join(__dirname, 'history.json');
 const TOKEN_FILE = process.env.HISTORY_PATH
@@ -53,6 +56,33 @@ const initUsers = () => {
   }));
   saveUsers(users);
   console.log(`Initialized users.json with ${users.length} user(s) from environment variables.`);
+};
+
+const initDb = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS song_history (
+      id SERIAL PRIMARY KEY,
+      title TEXT,
+      artist TEXT,
+      album TEXT,
+      album_art TEXT,
+      spotify_uri TEXT UNIQUE,
+      spotify_url TEXT,
+      sent_by TEXT,
+      sent_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS spotify_tokens (
+      id INT PRIMARY KEY DEFAULT 1,
+      refresh_token TEXT
+    );
+  `);
+  console.log('Database tables ready.');
 };
 
 initUsers();
@@ -389,7 +419,12 @@ app.post('/api/send', (req, res) => {
   res.json({ success: true });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  scheduleMidnightClear();
+initDb().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+    scheduleMidnightClear();
+  });
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });
