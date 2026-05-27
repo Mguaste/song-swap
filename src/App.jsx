@@ -154,6 +154,7 @@ function App() {
   const selectFriend = async (friendship) => {
     setActiveFriendship(friendship);
     activeFriendshipRef.current = friendship;
+    if (window.innerWidth <= 700) setSidebarOpen(false);
     setSpotifyLink('');
     setSongDetails(null);
     setDuplicate(null);
@@ -275,6 +276,7 @@ function App() {
       </header>
 
       <div id="app-body">
+        {sidebarOpen && <div id="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <aside id="sidebar" className={sidebarOpen ? 'open' : 'closed'}>
           <div id="sidebar-inner">
             {/* Friend code */}

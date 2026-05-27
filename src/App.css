@@ -3,13 +3,18 @@
 #screen {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 #app-body {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
+}
+
+#sidebar-backdrop {
+  display: none;
 }
 
 /* ── Header ── */
@@ -896,13 +901,21 @@ img.album-art {
 /* ── Responsive ── */
 
 @media (max-width: 700px) {
+  #sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 99;
+  }
+
   #sidebar {
     position: fixed;
     top: 0;
     left: 0;
     height: 100%;
     z-index: 100;
-    box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
   }
 
   #sidebar.closed {
@@ -915,11 +928,17 @@ img.album-art {
 
   .album-art,
   .send-art-wrapper {
-    width: 60vw;
-    height: 60vw;
+    width: 55vw;
+    height: 55vw;
   }
 
   #main-content {
     padding: 16px 14px 40px;
+    width: 100%;
+  }
+
+  #empty-state {
+    padding-top: 60px;
+    justify-content: flex-start;
   }
 }
