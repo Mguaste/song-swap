@@ -620,6 +620,249 @@ img.album-art {
   color: #1ed760;
 }
 
+/* ── Back Button ── */
+
+#back-btn {
+  font-size: 1.6rem;
+  font-family: inherit;
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  padding: 0 10px 0 0;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+#back-btn:hover {
+  color: #fff;
+}
+
+/* ── Friend Code Card ── */
+
+#friend-code-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: #181818;
+  border: 1px solid #282828;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+  color: #b3b3b3;
+}
+
+#friend-code-card strong {
+  color: #fff;
+  letter-spacing: 0.1em;
+  font-size: 1rem;
+}
+
+.copy-btn {
+  margin-left: auto;
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 20px;
+  color: #b3b3b3;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.copy-btn:hover {
+  border-color: #1DB954;
+  color: #1DB954;
+}
+
+/* ── Add Friend Card ── */
+
+#add-friend-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  background: #181818;
+  border: 1px solid #282828;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+#add-friend-card input {
+  flex: 1;
+  min-width: 120px;
+  padding: 9px 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  letter-spacing: 0.1em;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #fff;
+  outline: none;
+  text-transform: uppercase;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+#add-friend-card input::placeholder {
+  color: #555;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+#add-friend-card input:focus {
+  border-color: #1DB954;
+  box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.12);
+}
+
+#add-friend-card button {
+  padding: 9px 18px;
+  font-size: 0.88rem;
+  font-family: inherit;
+  font-weight: 700;
+  background: #1DB954;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s, transform 0.1s;
+}
+
+#add-friend-card button:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.error-msg {
+  width: 100%;
+  margin: 0;
+  font-size: 0.82rem;
+  color: #ff5555;
+}
+
+.success-msg {
+  width: 100%;
+  margin: 0;
+  font-size: 0.82rem;
+  color: #1DB954;
+}
+
+/* ── Friend Requests ── */
+
+#friend-requests {
+  margin-bottom: 20px;
+}
+
+.section-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #b3b3b3;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #282828;
+}
+
+.friend-request-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #181818;
+  border: 1px solid #282828;
+  margin-bottom: 8px;
+}
+
+.request-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: #fff;
+  font-weight: 500;
+}
+
+.accept-btn {
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 600;
+  background: #1DB954;
+  color: #000;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.accept-btn:hover { filter: brightness(1.1); }
+
+.decline-btn {
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 20px;
+  color: #999;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.decline-btn:hover {
+  border-color: #ff5555;
+  color: #ff5555;
+}
+
+/* ── Friends List ── */
+
+#friends-list {
+  margin-bottom: 20px;
+}
+
+.friend-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  background: #181818;
+  border: 1px solid #282828;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.friend-item:hover {
+  border-color: #1DB954;
+  background: #1a1a1a;
+}
+
+.friend-name {
+  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #fff;
+}
+
+.friend-arrow {
+  font-size: 1.3rem;
+  color: #555;
+}
+
+.empty-msg {
+  font-size: 0.85rem;
+  color: #555;
+  text-align: center;
+  padding: 24px 0;
+  margin: 0;
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 600px) {
