@@ -12,52 +12,6 @@ require('dotenv').config();
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-const HISTORY_FILE = process.env.HISTORY_PATH || path.join(__dirname, 'history.json');
-const TOKEN_FILE = process.env.HISTORY_PATH
-  ? path.join(path.dirname(process.env.HISTORY_PATH), 'spotify-tokens.json')
-  : path.join(__dirname, 'spotify-tokens.json');
-const USERS_FILE = path.join(__dirname, 'users.json');
-
-const loadHistory = () => {
-  try { return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { return []; }
-};
-
-const saveHistory = (history) => {
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
-};
-
-const loadTokens = () => {
-  try { return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')); } catch { return null; }
-};
-
-const saveTokens = (tokens) => {
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
-};
-
-const loadUsers = () => {
-  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch { return []; }
-};
-
-const saveUsers = (users) => {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-};
-
-// On first run, migrate env-var users into users.json with hashed passwords
-const initUsers = () => {
-  if (fs.existsSync(USERS_FILE)) return;
-  const envUsers = [
-    { name: process.env.USER1_NAME, password: process.env.USER1_PASSWORD },
-    { name: process.env.USER2_NAME, password: process.env.USER2_PASSWORD },
-  ].filter(u => u.name && u.password);
-  const users = envUsers.map(u => ({
-    name: u.name,
-    passwordHash: bcrypt.hashSync(u.password, 10),
-    createdAt: new Date().toISOString(),
-  }));
-  saveUsers(users);
-  console.log(`Initialized users.json with ${users.length} user(s) from environment variables.`);
-};
-
 const initDb = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -82,26 +36,42 @@ const initDb = async () => {
       refresh_token TEXT
     );
   `);
+
+  const { rows } = await pool.query('SELECT COUNT(*) FROM users');
+  if (parseInt(rows[0].count) === 0) {
+    const envUsers = [
+      { name: process.env.USER1_NAME, password: process.env.USER1_PASSWORD },
+      { name: process.env.USER2_NAME, password: process.env.USER2_PASSWORD },
+    ].filter(u => u.name && u.password);
+    for (const u of envUsers) {
+      const hash = await bcrypt.hash(u.password, 10);
+      await pool.query(
+        'INSERT INTO users (name, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [u.name, hash]
+      );
+    }
+    if (envUsers.length) console.log(`Seeded ${envUsers.length} user(s) from environment variables.`);
+  }
+
   console.log('Database tables ready.');
 };
 
-initUsers();
-
-let songHistory = loadHistory();
-
 const getPlaylistAccessToken = async () => {
-  const tokens = loadTokens();
-  if (!tokens?.refresh_token) return null;
+  const { rows } = await pool.query('SELECT refresh_token FROM spotify_tokens WHERE id = 1');
+  const refreshToken = rows[0]?.refresh_token;
+  if (!refreshToken) return null;
   const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       Authorization: `Basic ${Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
     },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token }),
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
   });
   const data = await res.json();
-  if (data.refresh_token) saveTokens({ ...tokens, refresh_token: data.refresh_token });
+  if (data.refresh_token) {
+    await pool.query('UPDATE spotify_tokens SET refresh_token = $1 WHERE id = 1', [data.refresh_token]);
+  }
   return data.access_token;
 };
 
@@ -141,11 +111,7 @@ const io = new Server(server, {
 });
 const PORT = process.env.PORT || 5050;
 
-// Track the last song sent by each user, rebuilt from history on startup
 const lastSentBy = {};
-for (const entry of songHistory) {
-  lastSentBy[entry.sentBy] = entry;
-}
 
 const clearLastSent = () => { for (const k of Object.keys(lastSentBy)) delete lastSentBy[k]; };
 
@@ -162,7 +128,6 @@ const scheduleMidnightClear = () => {
   }, msUntilMidnight);
 };
 
-//middleware
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(bodyParser.json());
 app.use(session({
@@ -178,15 +143,22 @@ app.use(session({
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
-  socket.on('send-song', ({ song, sentBy }) => {
-    const duplicate = songHistory.find(e => e.spotifyUri === song.spotifyUri);
-    if (duplicate) {
-      socket.emit('duplicate-song', duplicate);
+  socket.on('send-song', async ({ song, sentBy }) => {
+    const { rows } = await pool.query('SELECT * FROM song_history WHERE spotify_uri = $1', [song.spotifyUri]);
+    if (rows.length > 0) {
+      const dup = rows[0];
+      socket.emit('duplicate-song', {
+        title: dup.title, artist: dup.artist, album: dup.album,
+        albumArt: dup.album_art, spotifyUri: dup.spotify_uri,
+        spotifyUrl: dup.spotify_url, sentBy: dup.sent_by, sentAt: dup.sent_at,
+      });
       return;
     }
+    await pool.query(
+      'INSERT INTO song_history (title, artist, album, album_art, spotify_uri, spotify_url, sent_by) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [song.title, song.artist, song.album, song.albumArt, song.spotifyUri, song.spotifyUrl, sentBy]
+    );
     const entry = { ...song, sentBy, sentAt: new Date().toISOString() };
-    songHistory.push(entry);
-    saveHistory(songHistory);
     lastSentBy[sentBy] = entry;
     socket.emit('send-success');
     socket.broadcast.emit('song-received', song);
@@ -196,35 +168,24 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
 });
 
-//Spotify API Credentials
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 
-//function to get Spotify Access Token
 const getSpotifyAccessToken = async () => {
-    const response = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${Buffer.from(
-          `${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`
-        ).toString('base64')}`,
-      },
-      body: 'grant_type=client_credentials',
-    });
-
-    const data = await response.json();
-
-    console.log("Token status:", response.status);
-    console.log("Token response:", data);
-
-    if (!response.ok) {
-      throw new Error(JSON.stringify(data));
-    }
-
-    return data.access_token;
-  };
-
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
+    },
+    body: 'grant_type=client_credentials',
+  });
+  const data = await response.json();
+  console.log("Token status:", response.status);
+  console.log("Token response:", data);
+  if (!response.ok) throw new Error(JSON.stringify(data));
+  return data.access_token;
+};
 
 const requireAuth = (req, res, next) => {
   if (req.session.user) return next();
@@ -243,28 +204,23 @@ app.post('/api/register', async (req, res) => {
   if (trimmed.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
-  const users = loadUsers();
-  if (users.find(u => u.name.toLowerCase() === trimmed.toLowerCase())) {
-    return res.status(409).json({ error: 'Username already taken' });
-  }
+  const { rows } = await pool.query('SELECT id FROM users WHERE LOWER(name) = LOWER($1)', [trimmed]);
+  if (rows.length > 0) return res.status(409).json({ error: 'Username already taken' });
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const newUser = { name: trimmed, passwordHash, createdAt: new Date().toISOString() };
-  users.push(newUser);
-  saveUsers(users);
+  await pool.query('INSERT INTO users (name, password_hash) VALUES ($1, $2)', [trimmed, passwordHash]);
 
-  req.session.user = { name: newUser.name };
-  res.status(201).json({ name: newUser.name });
+  req.session.user = { name: trimmed };
+  res.status(201).json({ name: trimmed });
 });
 
 app.post('/api/login', async (req, res) => {
   const { name, password } = req.body;
-  const users = loadUsers();
-  const match = users.find(u => u.name.toLowerCase() === name?.toLowerCase());
-  if (!match) return res.status(401).json({ error: 'Invalid username or password' });
-  const valid = await bcrypt.compare(password, match.passwordHash);
+  const { rows } = await pool.query('SELECT * FROM users WHERE LOWER(name) = LOWER($1)', [name]);
+  if (rows.length === 0) return res.status(401).json({ error: 'Invalid username or password' });
+  const valid = await bcrypt.compare(password, rows[0].password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
-  req.session.user = { name: match.name };
+  req.session.user = { name: rows[0].name };
   res.json(req.session.user);
 });
 
@@ -278,14 +234,18 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/history', requireAuth, (req, res) => {
-  res.json(songHistory);
+app.get('/api/history', requireAuth, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM song_history ORDER BY sent_at ASC');
+  res.json(rows.map(r => ({
+    title: r.title, artist: r.artist, album: r.album,
+    albumArt: r.album_art, spotifyUri: r.spotify_uri,
+    spotifyUrl: r.spotify_url, sentBy: r.sent_by, sentAt: r.sent_at,
+  })));
 });
 
-app.delete('/api/admin/history', requireAdmin, (req, res) => {
-  songHistory = [];
+app.delete('/api/admin/history', requireAdmin, async (req, res) => {
+  await pool.query('DELETE FROM song_history');
   clearLastSent();
-  saveHistory(songHistory);
   io.emit('song-cleared');
   io.emit('history-cleared');
   res.json({ success: true });
@@ -317,16 +277,19 @@ app.get('/api/spotify-callback', async (req, res) => {
   });
   const tokens = await tokenRes.json();
   if (tokens.refresh_token) {
-    saveTokens({ refresh_token: tokens.refresh_token });
+    await pool.query(
+      'INSERT INTO spotify_tokens (id, refresh_token) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET refresh_token = $1',
+      [tokens.refresh_token]
+    );
     res.redirect('/?spotify=connected');
   } else {
     res.status(500).send('Failed to get Spotify token');
   }
 });
 
-app.get('/api/spotify-status', requireAdmin, (req, res) => {
-  const tokens = loadTokens();
-  res.json({ connected: !!tokens?.refresh_token });
+app.get('/api/spotify-status', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query('SELECT refresh_token FROM spotify_tokens WHERE id = 1');
+  res.json({ connected: !!rows[0]?.refresh_token });
 });
 
 app.delete('/api/current-songs', requireAuth, (req, res) => {
@@ -353,47 +316,23 @@ if (fs.existsSync(DIST)) {
   app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
-// Example route to verify Spotify link
 app.post('/api/verify', requireAuth, async (req, res) => {
   console.log('Request received at /api/verify');
-
   const { link } = req.body;
-
   console.log('Received link:', link);
-
   const songId = link.split('/track/')[1]?.split('?')[0];
-
   console.log('Extracted song ID:', songId);
-
-  if (!songId) {
-    return res.status(400).json({ error: 'Invalid Spotify link' });
-  }
+  if (!songId) return res.status(400).json({ error: 'Invalid Spotify link' });
 
   try {
-    // Get Spotify token
     const accessToken = await getSpotifyAccessToken();
-
     console.log('Access token received');
-
-    // Fetch song details from Spotify
-    const response = await fetch(
-      `https://api.spotify.com/v1/tracks/${songId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-
+    const response = await fetch(`https://api.spotify.com/v1/tracks/${songId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
     const data = await response.json();
-
     console.log('Spotify API response:', data);
-
-    if (!response.ok) {
-      return res.status(response.status).json(data);
-    }
-
-    // Send useful data back to frontend
+    if (!response.ok) return res.status(response.status).json(data);
     res.json({
       title: data.name,
       artist: data.artists[0].name,
@@ -402,14 +341,9 @@ app.post('/api/verify', requireAuth, async (req, res) => {
       spotifyUri: data.uri,
       spotifyUrl: data.external_urls.spotify,
     });
-
   } catch (error) {
     console.error('Error fetching song details:', error);
-
-    res.status(500).json({
-      error: 'Failed to fetch song details',
-      details: error.message,
-    });
+    res.status(500).json({ error: 'Failed to fetch song details', details: error.message });
   }
 });
 
@@ -419,7 +353,17 @@ app.post('/api/send', (req, res) => {
   res.json({ success: true });
 });
 
-initDb().then(() => {
+initDb().then(async () => {
+  const { rows } = await pool.query(
+    'SELECT DISTINCT ON (sent_by) * FROM song_history ORDER BY sent_by, sent_at DESC'
+  );
+  for (const r of rows) {
+    lastSentBy[r.sent_by] = {
+      title: r.title, artist: r.artist, album: r.album,
+      albumArt: r.album_art, spotifyUri: r.spotify_uri,
+      spotifyUrl: r.spotify_url, sentBy: r.sent_by, sentAt: r.sent_at,
+    };
+  }
   server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
     scheduleMidnightClear();
