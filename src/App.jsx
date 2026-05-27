@@ -32,7 +32,8 @@ function LoginForm({ onLogin }) {
     if (res.ok) {
       onLogin(await res.json());
     } else {
-      setError('Wrong password');
+      const data = await res.json();
+      setError(data.error || 'Invalid username or password');
     }
   };
 
@@ -41,13 +42,48 @@ function LoginForm({ onLogin }) {
       <input placeholder="Username" value={name} onChange={e => setName(e.target.value)} />
       <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
       {error && <p id="login-error">{error}</p>}
-      <button type="submit">Enter</button>
+      <button type="submit">Log In</button>
+    </form>
+  );
+}
+
+function RegisterForm({ onLogin }) {
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (password !== confirm) { setError('Passwords do not match'); return; }
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name, password }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      onLogin(data);
+    } else {
+      setError(data.error || 'Registration failed');
+    }
+  };
+
+  return (
+    <form id="login-form" onSubmit={submit}>
+      <input placeholder="Username" value={name} onChange={e => setName(e.target.value)} />
+      <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
+      <input type="password" placeholder="Confirm Password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+      {error && <p id="login-error">{error}</p>}
+      <button type="submit">Sign Up</button>
     </form>
   );
 }
 
 function App() {
   const [user, setUser] = useState(undefined);
+  const [authMode, setAuthMode] = useState('login');
   const [spotifyLink, setSpotifyLink] = useState('');
   const [sent, setSent] = useState(false);
   const [denied, setDenied] = useState(false);
@@ -151,7 +187,7 @@ function App() {
     window.location.href = song.spotifyUri;
     setTimeout(() => { window.open(song.spotifyUrl, '_blank'); }, 1000);
   };
-  
+
 
   if (user === undefined) return null;
 
@@ -161,7 +197,17 @@ function App() {
         <img src={icon} id="login-logo" alt="icon" />
         <h1 id="login-title">Song Swap</h1>
         <p id="login-subtitle">Community in Music</p>
-        <LoginForm onLogin={setUser} />
+        {authMode === 'login'
+          ? <LoginForm onLogin={setUser} />
+          : <RegisterForm onLogin={setUser} />
+        }
+        <p id="auth-toggle">
+          {authMode === 'login' ? (
+            <>No account? <button className="link-btn" onClick={() => setAuthMode('register')}>Sign up</button></>
+          ) : (
+            <>Have an account? <button className="link-btn" onClick={() => setAuthMode('login')}>Log in</button></>
+          )}
+        </p>
       </div>
     </div>
   );

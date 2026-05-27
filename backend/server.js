@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const session = require('express-session');
+const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -12,6 +13,7 @@ const HISTORY_FILE = process.env.HISTORY_PATH || path.join(__dirname, 'history.j
 const TOKEN_FILE = process.env.HISTORY_PATH
   ? path.join(path.dirname(process.env.HISTORY_PATH), 'spotify-tokens.json')
   : path.join(__dirname, 'spotify-tokens.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
 
 const loadHistory = () => {
   try { return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { return []; }
@@ -28,6 +30,32 @@ const loadTokens = () => {
 const saveTokens = (tokens) => {
   fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
 };
+
+const loadUsers = () => {
+  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch { return []; }
+};
+
+const saveUsers = (users) => {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+};
+
+// On first run, migrate env-var users into users.json with hashed passwords
+const initUsers = () => {
+  if (fs.existsSync(USERS_FILE)) return;
+  const envUsers = [
+    { name: process.env.USER1_NAME, password: process.env.USER1_PASSWORD },
+    { name: process.env.USER2_NAME, password: process.env.USER2_PASSWORD },
+  ].filter(u => u.name && u.password);
+  const users = envUsers.map(u => ({
+    name: u.name,
+    passwordHash: bcrypt.hashSync(u.password, 10),
+    createdAt: new Date().toISOString(),
+  }));
+  saveUsers(users);
+  console.log(`Initialized users.json with ${users.length} user(s) from environment variables.`);
+};
+
+initUsers();
 
 let songHistory = loadHistory();
 
@@ -154,16 +182,16 @@ const getSpotifyAccessToken = async () => {
       },
       body: 'grant_type=client_credentials',
     });
-  
+
     const data = await response.json();
-  
+
     console.log("Token status:", response.status);
     console.log("Token response:", data);
-  
+
     if (!response.ok) {
       throw new Error(JSON.stringify(data));
     }
-  
+
     return data.access_token;
   };
 
@@ -178,15 +206,34 @@ const requireAdmin = (req, res, next) => {
   res.status(403).json({ error: 'Forbidden' });
 };
 
-const USERS = [
-  { name: process.env.USER1_NAME, password: process.env.USER1_PASSWORD },
-  { name: process.env.USER2_NAME, password: process.env.USER2_PASSWORD },
-];
-
-app.post('/api/login', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { name, password } = req.body;
-  const match = USERS.find(u => u.name === name && u.password === password);
+  const trimmed = name?.trim();
+  if (!trimmed || !password) return res.status(400).json({ error: 'Name and password required' });
+  if (trimmed.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+  const users = loadUsers();
+  if (users.find(u => u.name.toLowerCase() === trimmed.toLowerCase())) {
+    return res.status(409).json({ error: 'Username already taken' });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const newUser = { name: trimmed, passwordHash, createdAt: new Date().toISOString() };
+  users.push(newUser);
+  saveUsers(users);
+
+  req.session.user = { name: newUser.name };
+  res.status(201).json({ name: newUser.name });
+});
+
+app.post('/api/login', async (req, res) => {
+  const { name, password } = req.body;
+  const users = loadUsers();
+  const match = users.find(u => u.name.toLowerCase() === name?.toLowerCase());
   if (!match) return res.status(401).json({ error: 'Invalid username or password' });
+  const valid = await bcrypt.compare(password, match.passwordHash);
+  if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
   req.session.user = { name: match.name };
   res.json(req.session.user);
 });
@@ -335,7 +382,7 @@ app.post('/api/verify', requireAuth, async (req, res) => {
     });
   }
 });
-  
+
 app.post('/api/send', (req, res) => {
   const song = req.body;
   io.emit('song-received', song);
