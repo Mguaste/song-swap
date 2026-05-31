@@ -107,7 +107,12 @@ function App() {
 
   const loadFriends = async () => {
     const r = await fetch('/api/friends', { credentials: 'include' });
-    if (r.ok) setFriends(await r.json());
+    if (r.ok) {
+      const data = await r.json();
+      setFriends(data);
+      return data;
+    }
+    return friends;
   };
 
   const loadRequests = async () => {
@@ -118,14 +123,24 @@ function App() {
   useEffect(() => { loadMe(); }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('spotify') === 'connected') {
+      window.history.replaceState({}, '', '/');
+      loadMe().then(() => {
+        fetch('/api/spotify-status', { credentials: 'include' })
+          .then(r => r.json())
+          .then(data => setSpotifyConnected(data.connected));
+      });
+    }
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
     loadFriends();
     loadRequests();
-    if (user.name === 'Mguaste') {
-      fetch('/api/spotify-status', { credentials: 'include' })
-        .then(r => r.json())
-        .then(data => setSpotifyConnected(data.connected));
-    }
+    fetch('/api/spotify-status', { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => setSpotifyConnected(data.connected));
   }, [user]);
 
   useEffect(() => {
@@ -152,8 +167,10 @@ function App() {
   }, []);
 
   const selectFriend = async (friendship) => {
-    setActiveFriendship(friendship);
-    activeFriendshipRef.current = friendship;
+    const freshFriends = await loadFriends();
+    const fresh = freshFriends.find(f => f.friendship_id === friendship.friendship_id) ?? friendship;
+    setActiveFriendship(fresh);
+    activeFriendshipRef.current = fresh;
     if (window.innerWidth <= 700) setSidebarOpen(false);
     setSpotifyLink('');
     setSongDetails(null);
@@ -161,14 +178,19 @@ function App() {
     setReceivedSong(null);
     setHistory([]);
     socket.emit('join-friendship', friendship.friendship_id);
-    const [histRes, curRes] = await Promise.all([
+    const [histRes, curRes, myRes] = await Promise.all([
       fetch(`/api/friends/${friendship.friendship_id}/history`, { credentials: 'include' }),
       fetch(`/api/friends/${friendship.friendship_id}/current-song`, { credentials: 'include' }),
+      fetch(`/api/friends/${friendship.friendship_id}/my-song`, { credentials: 'include' }),
     ]);
     if (histRes.ok) setHistory((await histRes.json()).slice().reverse());
     if (curRes.ok) {
       const song = await curRes.json();
       if (song && song.sentBy !== user.name) setReceivedSong(song);
+    }
+    if (myRes.ok) {
+      const mySong = await myRes.json();
+      if (mySong) setSongDetails(mySong);
     }
   };
 
@@ -305,6 +327,29 @@ function App() {
               {addCodeSuccess && <p className="sidebar-feedback success">{addCodeSuccess}</p>}
             </div>
 
+            {/* Spotify connection */}
+            <div className="sidebar-section">
+              <p className="sidebar-label">Spotify</p>
+              {spotifyConnected ? (
+                <div className="spotify-status-row">
+                  <span className="spotify-connected-label">Connected</span>
+                  <button
+                    className="copy-btn"
+                    onClick={() =>
+                      fetch('/api/spotify-disconnect', { method: 'DELETE', credentials: 'include' })
+                        .then(() => setSpotifyConnected(false))
+                    }
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ) : (
+                <a href="/api/spotify-auth" style={{ textDecoration: 'none' }}>
+                  <button className="spotify-connect-btn">Connect Spotify</button>
+                </a>
+              )}
+            </div>
+
             {/* Friend requests */}
             {friendRequests.length > 0 && (
               <div className="sidebar-section">
@@ -412,6 +457,25 @@ function App() {
                 </div>
               </div>
 
+              {activeFriendship.spotify_playlist_id ? (
+                <div id="friendship-playlist">
+                  <a
+                    href={`https://open.spotify.com/playlist/${activeFriendship.spotify_playlist_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="playlist-link"
+                  >
+                    Open shared playlist on Spotify
+                  </a>
+                </div>
+              ) : spotifyConnected ? (
+                <p className="playlist-prompt">Waiting for {activeFriendship.friend_name} to connect Spotify&hellip;</p>
+              ) : (
+                <p className="playlist-prompt">
+                  <a href="/api/spotify-auth" className="link-btn">Connect Spotify</a> to create a shared playlist with {activeFriendship.friend_name}
+                </p>
+              )}
+
               {history.length > 0 && (
                 <div id="history">
                   <h2 id="history-title">History</h2>
@@ -435,9 +499,6 @@ function App() {
                   <h2 id="admin-title">Admin</h2>
                   <button onClick={() => fetch('/api/admin/history', { method: 'DELETE', credentials: 'include' })}>Clear All History</button>
                   <button onClick={() => fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' })}>Clear Current Songs</button>
-                  <a href="/api/spotify-auth">
-                    <button id="spotify-connect-btn">{spotifyConnected ? 'Spotify Connected ✓' : 'Connect Spotify'}</button>
-                  </a>
                 </div>
               )}
             </>
