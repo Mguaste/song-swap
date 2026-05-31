@@ -53,6 +53,16 @@ const initDb = async () => {
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS friendship_id INT REFERENCES friendships(id)');
   await pool.query('ALTER TABLE song_history DROP CONSTRAINT IF EXISTS song_history_spotify_uri_key');
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_spotify_tokens (
+      user_id       INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      refresh_token TEXT NOT NULL,
+      updated_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS spotify_playlist_id TEXT');
+  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS playlist_creating BOOLEAN DEFAULT FALSE');
+
   // Generate friend codes for existing users that don't have one
   const { rows: needsCodes } = await pool.query('SELECT id FROM users WHERE friend_code IS NULL');
   for (const user of needsCodes) {
@@ -63,6 +73,17 @@ const initDb = async () => {
       unique = rows.length === 0;
     }
     await pool.query('UPDATE users SET friend_code = $1 WHERE id = $2', [code, user.id]);
+  }
+
+  // Migrate singleton Spotify token → per-user table (one-time, idempotent)
+  const { rows: adminUser } = await pool.query(`SELECT id FROM users WHERE LOWER(name) = 'mguaste'`);
+  const { rows: oldToken } = await pool.query('SELECT refresh_token FROM spotify_tokens WHERE id = 1');
+  if (adminUser[0] && oldToken[0]?.refresh_token) {
+    await pool.query(
+      `INSERT INTO user_spotify_tokens (user_id, refresh_token) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING`,
+      [adminUser[0].id, oldToken[0].refresh_token]
+    );
+    console.log('Migrated singleton Spotify token to Mguaste user record.');
   }
 
   // Seed env-var users if table is empty
@@ -116,6 +137,120 @@ const addToPlaylist = async (spotifyUri) => {
   const checkData = await checkRes.json();
   const alreadyIn = checkData.items?.some(item => item.track?.uri === spotifyUri);
   if (alreadyIn) return;
+  await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uris: [spotifyUri] }),
+  });
+};
+
+const getUserAccessToken = async (userId) => {
+  const { rows } = await pool.query('SELECT refresh_token FROM user_spotify_tokens WHERE user_id = $1', [userId]);
+  const refreshToken = rows[0]?.refresh_token;
+  if (!refreshToken) return null;
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
+    },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+  });
+  const data = await res.json();
+  if (data.refresh_token) {
+    await pool.query('UPDATE user_spotify_tokens SET refresh_token = $1, updated_at = NOW() WHERE user_id = $2', [data.refresh_token, userId]);
+  }
+  return data.access_token ?? null;
+};
+
+const createCollaborativePlaylist = async (ownerUserId, friendshipId) => {
+  const { rows: claim } = await pool.query(
+    `UPDATE friendships SET playlist_creating = TRUE
+     WHERE id = $1 AND spotify_playlist_id IS NULL AND playlist_creating = FALSE
+     RETURNING id`,
+    [friendshipId]
+  );
+  if (claim.length === 0) return;
+
+  try {
+    const accessToken = await getUserAccessToken(ownerUserId);
+    if (!accessToken) throw new Error('No access token for user ' + ownerUserId);
+
+    const profileRes = await fetch('https://api.spotify.com/v1/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const profile = await profileRes.json();
+
+    const { rows: fship } = await pool.query(
+      `SELECT u1.name AS name1, u2.name AS name2
+       FROM friendships f
+       JOIN users u1 ON u1.id = f.requester_id
+       JOIN users u2 ON u2.id = f.receiver_id
+       WHERE f.id = $1`,
+      [friendshipId]
+    );
+    const playlistName = `Song Swap: ${fship[0].name1} & ${fship[0].name2}`;
+
+    const createRes = await fetch(`https://api.spotify.com/v1/users/${profile.id}/playlists`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: playlistName, public: false, collaborative: true, description: 'Auto-created by Song Swap' }),
+    });
+    const playlist = await createRes.json();
+    if (!playlist.id) throw new Error('Spotify did not return a playlist id: ' + JSON.stringify(playlist));
+
+    await pool.query(
+      'UPDATE friendships SET spotify_playlist_id = $1, playlist_creating = FALSE WHERE id = $2',
+      [playlist.id, friendshipId]
+    );
+
+    const { rows: songs } = await pool.query(
+      'SELECT spotify_uri FROM song_history WHERE friendship_id = $1 AND spotify_uri IS NOT NULL ORDER BY sent_at ASC',
+      [friendshipId]
+    );
+    const uris = songs.map(s => s.spotify_uri);
+    for (let i = 0; i < uris.length; i += 100) {
+      await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uris: uris.slice(i, i + 100) }),
+      });
+    }
+
+    console.log(`Created playlist ${playlist.id} for friendship ${friendshipId}, backfilled ${uris.length} tracks.`);
+  } catch (err) {
+    await pool.query('UPDATE friendships SET playlist_creating = FALSE WHERE id = $1', [friendshipId]);
+    console.error('createCollaborativePlaylist failed:', err);
+  }
+};
+
+const checkAndCreatePlaylistForFriendship = async (friendshipId) => {
+  const { rows } = await pool.query(
+    `SELECT f.requester_id, f.spotify_playlist_id,
+            ust1.refresh_token AS requester_token,
+            ust2.refresh_token AS receiver_token
+     FROM friendships f
+     LEFT JOIN user_spotify_tokens ust1 ON ust1.user_id = f.requester_id
+     LEFT JOIN user_spotify_tokens ust2 ON ust2.user_id = f.receiver_id
+     WHERE f.id = $1 AND f.status = 'accepted'`,
+    [friendshipId]
+  );
+  if (rows.length === 0) return;
+  const f = rows[0];
+  if (f.spotify_playlist_id) return;
+  if (!f.requester_token || !f.receiver_token) return;
+  await createCollaborativePlaylist(f.requester_id, friendshipId);
+};
+
+const addTrackToFriendshipPlaylist = async (friendshipId, spotifyUri) => {
+  const { rows } = await pool.query(
+    'SELECT spotify_playlist_id, requester_id FROM friendships WHERE id = $1',
+    [friendshipId]
+  );
+  const playlistId = rows[0]?.spotify_playlist_id;
+  if (!playlistId) return;
+  const accessToken = await getUserAccessToken(rows[0].requester_id);
+  if (!accessToken) return;
   await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -204,7 +339,7 @@ io.on('connection', (socket) => {
     socket.emit('send-success');
     socket.to(`friendship-${friendshipId}`).emit('song-received', { ...song, friendshipId });
     io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
-    addToPlaylist(song.spotifyUri).catch(err => console.error('Playlist add failed:', err));
+    addTrackToFriendshipPlaylist(friendshipId, song.spotifyUri).catch(err => console.error('Playlist track add failed:', err));
   });
 
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
@@ -324,6 +459,9 @@ app.post('/api/friends/accept/:id', requireAuth, async (req, res) => {
     [req.params.id, me[0].id]
   );
   if (rows.length === 0) return res.status(404).json({ error: 'Request not found' });
+  checkAndCreatePlaylistForFriendship(rows[0].id).catch(err =>
+    console.error('Post-accept playlist check failed:', err)
+  );
   res.json({ success: true });
 });
 
@@ -343,7 +481,8 @@ app.get('/api/friends', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT f.id AS friendship_id,
        CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name,
-       CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code
+       CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code,
+       f.spotify_playlist_id
      FROM friendships f
      JOIN users u1 ON u1.id = f.requester_id
      JOIN users u2 ON u2.id = f.receiver_id
@@ -382,6 +521,13 @@ app.get('/api/friends/:id/current-song', requireAuth, (req, res) => {
   res.json(other ? other[1] : null);
 });
 
+app.get('/api/friends/:id/my-song', requireAuth, (req, res) => {
+  const myName = req.session.user.name;
+  const fid = parseInt(req.params.id);
+  const songs = lastSentByFriendship[fid] || {};
+  res.json(songs[myName] || null);
+});
+
 app.get('/api/history', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM song_history ORDER BY sent_at ASC');
   res.json(rows.map(r => ({
@@ -399,18 +545,29 @@ app.delete('/api/admin/history', requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/spotify-auth', requireAdmin, (req, res) => {
+app.get('/api/spotify-auth', requireAuth, (req, res) => {
+  const state = Buffer.from(req.session.user.name).toString('base64');
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: process.env.SPOTIFY_CLIENT_ID,
     scope: 'playlist-modify-public playlist-modify-private',
     redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+    state,
   });
   res.redirect(`https://accounts.spotify.com/authorize?${params}`);
 });
 
 app.get('/api/spotify-callback', async (req, res) => {
-  const code = req.query.code;
+  const { code, state } = req.query;
+  if (!code || !state) return res.status(400).send('Missing code or state');
+
+  let userName;
+  try {
+    userName = Buffer.from(state, 'base64').toString('utf8');
+  } catch {
+    return res.status(400).send('Invalid state');
+  }
+
   const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
@@ -424,20 +581,43 @@ app.get('/api/spotify-callback', async (req, res) => {
     }),
   });
   const tokens = await tokenRes.json();
-  if (tokens.refresh_token) {
-    await pool.query(
-      'INSERT INTO spotify_tokens (id, refresh_token) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET refresh_token = $1',
-      [tokens.refresh_token]
+  if (!tokens.refresh_token) return res.status(500).send('Failed to get Spotify token');
+
+  const { rows: userRows } = await pool.query('SELECT id FROM users WHERE name = $1', [userName]);
+  if (userRows.length === 0) return res.status(404).send('User not found');
+  const userId = userRows[0].id;
+
+  await pool.query(
+    `INSERT INTO user_spotify_tokens (user_id, refresh_token)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET refresh_token = $2, updated_at = NOW()`,
+    [userId, tokens.refresh_token]
+  );
+
+  // Trigger playlist creation for all accepted friendships where other user also has Spotify
+  const { rows: friendships } = await pool.query(
+    `SELECT id FROM friendships WHERE (requester_id = $1 OR receiver_id = $1) AND status = 'accepted'`,
+    [userId]
+  );
+  for (const f of friendships) {
+    checkAndCreatePlaylistForFriendship(f.id).catch(err =>
+      console.error(`Post-connect playlist check failed for friendship ${f.id}:`, err)
     );
-    res.redirect('/?spotify=connected');
-  } else {
-    res.status(500).send('Failed to get Spotify token');
   }
+
+  res.redirect('/?spotify=connected');
 });
 
-app.get('/api/spotify-status', requireAdmin, async (req, res) => {
-  const { rows } = await pool.query('SELECT refresh_token FROM spotify_tokens WHERE id = 1');
+app.get('/api/spotify-status', requireAuth, async (req, res) => {
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  const { rows } = await pool.query('SELECT refresh_token FROM user_spotify_tokens WHERE user_id = $1', [me[0].id]);
   res.json({ connected: !!rows[0]?.refresh_token });
+});
+
+app.delete('/api/spotify-disconnect', requireAuth, async (req, res) => {
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  await pool.query('DELETE FROM user_spotify_tokens WHERE user_id = $1', [me[0].id]);
+  res.json({ success: true });
 });
 
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
