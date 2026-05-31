@@ -100,6 +100,10 @@ function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [spotifyConnected, setSpotifyConnected] = useState(false);
 
+  // Unread tracking
+  const [unreadFriendships, setUnreadFriendships] = useState(new Set());
+  const userRef = useRef(null);
+
   const loadMe = async () => {
     const r = await fetch('/api/me', { credentials: 'include' });
     setUser(r.ok ? await r.json() : null);
@@ -120,6 +124,20 @@ function App() {
     if (r.ok) setFriendRequests(await r.json());
   };
 
+  const loadUnreadStatus = async (currentUser) => {
+    const r = await fetch('/api/friends/latest-activity', { credentials: 'include' });
+    if (!r.ok) return;
+    const activities = await r.json();
+    const key = `ss_last_viewed_${currentUser.name}`;
+    const lastViewed = JSON.parse(localStorage.getItem(key) || '{}');
+    const unread = new Set();
+    for (const { friendshipId, sentAt } of activities) {
+      const lv = lastViewed[friendshipId];
+      if (!lv || new Date(sentAt) > new Date(lv)) unread.add(friendshipId);
+    }
+    setUnreadFriendships(unread);
+  };
+
   useEffect(() => { loadMe(); }, []);
 
   useEffect(() => {
@@ -135,9 +153,11 @@ function App() {
   }, []);
 
   useEffect(() => {
+    userRef.current = user;
     if (!user) return;
     loadFriends();
     loadRequests();
+    loadUnreadStatus(user);
     fetch('/api/spotify-status', { credentials: 'include' })
       .then(r => r.json())
       .then(data => setSpotifyConnected(data.connected));
@@ -152,7 +172,11 @@ function App() {
     socket.on('send-success', () => { setSent(true); setTimeout(() => setSent(false), 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('history-updated', (entry) => {
-      if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) setHistory(prev => [entry, ...prev]);
+      if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
+        setHistory(prev => [entry, ...prev]);
+      } else if (entry.sentBy !== userRef.current?.name) {
+        setUnreadFriendships(prev => new Set([...prev, entry.friendshipId]));
+      }
     });
     socket.on('history-cleared', () => setHistory([]));
     return () => {
@@ -177,13 +201,20 @@ function App() {
     setDuplicate(null);
     setReceivedSong(null);
     setHistory([]);
+    // Mark as read
+    setUnreadFriendships(prev => { const next = new Set(prev); next.delete(friendship.friendship_id); return next; });
+    const lvKey = `ss_last_viewed_${userRef.current?.name}`;
+    const lv = JSON.parse(localStorage.getItem(lvKey) || '{}');
+    lv[friendship.friendship_id] = new Date().toISOString();
+    localStorage.setItem(lvKey, JSON.stringify(lv));
+
     socket.emit('join-friendship', friendship.friendship_id);
     const [histRes, curRes, myRes] = await Promise.all([
       fetch(`/api/friends/${friendship.friendship_id}/history`, { credentials: 'include' }),
       fetch(`/api/friends/${friendship.friendship_id}/current-song`, { credentials: 'include' }),
       fetch(`/api/friends/${friendship.friendship_id}/my-song`, { credentials: 'include' }),
     ]);
-    if (histRes.ok) setHistory((await histRes.json()).slice().reverse());
+    if (histRes.ok) setHistory(await histRes.json());
     if (curRes.ok) {
       const song = await curRes.json();
       if (song && song.sentBy !== user.name) setReceivedSong(song);
@@ -283,6 +314,7 @@ function App() {
       <header id="title-card">
         <button id="sidebar-toggle" onClick={() => setSidebarOpen(v => !v)} aria-label="Toggle sidebar">
           <span /><span /><span />
+          {unreadFriendships.size > 0 && <span className="unread-badge">{unreadFriendships.size}</span>}
         </button>
         <img src={icon} id="logo" alt='icon' />
         <h1 id="main-title">
@@ -383,6 +415,7 @@ function App() {
                   >
                     <div className="friend-avatar">{f.friend_name[0].toUpperCase()}</div>
                     <span className="friend-name">{f.friend_name}</span>
+                    {unreadFriendships.has(f.friendship_id) && <span className="unread-dot" />}
                   </div>
                 ))
               )}

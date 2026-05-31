@@ -1000,3 +1000,36 @@ img.album-art {
   color: #555;
   margin: 14px 0 0;
 }
+
+/* ── Unread Indicators ── */
+
+#sidebar-toggle {
+  position: relative;
+}
+
+.unread-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #1DB954;
+  color: #000;
+  font-size: 0.58rem;
+  font-weight: 800;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  pointer-events: none;
+}
+
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1DB954;
+  flex-shrink: 0;
+  margin-left: auto;
+}
