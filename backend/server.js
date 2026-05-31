@@ -493,6 +493,22 @@ app.get('/api/friends', requireAuth, async (req, res) => {
 });
 
 // Song history for a specific friendship
+// Latest unread activity per friendship (most recent song NOT sent by current user)
+app.get('/api/friends/latest-activity', requireAuth, async (req, res) => {
+  const { rows: me } = await pool.query('SELECT id, name FROM users WHERE name = $1', [req.session.user.name]);
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (sh.friendship_id) sh.friendship_id, sh.sent_at, sh.sent_by
+     FROM song_history sh
+     JOIN friendships f ON f.id = sh.friendship_id
+     WHERE (f.requester_id = $1 OR f.receiver_id = $1)
+       AND f.status = 'accepted'
+       AND sh.sent_by != $2
+     ORDER BY sh.friendship_id, sh.sent_at DESC`,
+    [me[0].id, me[0].name]
+  );
+  res.json(rows.map(r => ({ friendshipId: r.friendship_id, sentAt: r.sent_at, sentBy: r.sent_by })));
+});
+
 app.get('/api/friends/:id/history', requireAuth, async (req, res) => {
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
   const { rows: membership } = await pool.query(
@@ -502,7 +518,7 @@ app.get('/api/friends/:id/history', requireAuth, async (req, res) => {
   if (membership.length === 0) return res.status(403).json({ error: 'Forbidden' });
 
   const { rows } = await pool.query(
-    'SELECT * FROM song_history WHERE friendship_id = $1 ORDER BY sent_at ASC',
+    'SELECT * FROM song_history WHERE friendship_id = $1 ORDER BY sent_at DESC',
     [req.params.id]
   );
   res.json(rows.map(r => ({
