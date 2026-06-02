@@ -164,6 +164,10 @@ app.use(session({
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
+  socket.on('join-user', (userName) => {
+    socket.join(`user-${userName}`);
+  });
+
   socket.on('join-friendship', (friendshipId) => {
     socket.join(`friendship-${friendshipId}`);
   });
@@ -312,6 +316,7 @@ app.post('/api/friends/add', requireAuth, async (req, res) => {
   if (existing.length > 0) return res.status(409).json({ error: 'Friend request already exists or already friends' });
 
   await pool.query('INSERT INTO friendships (requester_id, receiver_id) VALUES ($1, $2)', [myId, theirId]);
+  io.to(`user-${target[0].name}`).emit('friend-request-received');
   res.status(201).json({ message: `Friend request sent to ${target[0].name}` });
 });
 
@@ -335,16 +340,31 @@ app.post('/api/friends/accept/:id', requireAuth, async (req, res) => {
     [req.params.id, me[0].id]
   );
   if (rows.length === 0) return res.status(404).json({ error: 'Request not found' });
+  // Notify both users so their friend lists update in real time
+  const { rows: requester } = await pool.query('SELECT name FROM users WHERE id = $1', [rows[0].requester_id]);
+  const { rows: receiver } = await pool.query('SELECT name FROM users WHERE id = $1', [rows[0].receiver_id]);
+  io.to(`user-${requester[0].name}`).emit('friendship-accepted');
+  io.to(`user-${receiver[0].name}`).emit('friendship-accepted');
   res.json({ success: true });
 });
 
 // Decline or cancel a friend request
 app.delete('/api/friends/requests/:id', requireAuth, async (req, res) => {
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  const { rows: fs } = await pool.query(
+    'SELECT requester_id, receiver_id FROM friendships WHERE id = $1 AND (requester_id = $2 OR receiver_id = $2)',
+    [req.params.id, me[0].id]
+  );
   await pool.query(
     'DELETE FROM friendships WHERE id = $1 AND (requester_id = $2 OR receiver_id = $2)',
     [req.params.id, me[0].id]
   );
+  if (fs.length > 0) {
+    const { rows: requester } = await pool.query('SELECT name FROM users WHERE id = $1', [fs[0].requester_id]);
+    const { rows: receiver } = await pool.query('SELECT name FROM users WHERE id = $1', [fs[0].receiver_id]);
+    io.to(`user-${requester[0].name}`).emit('friend-request-declined');
+    io.to(`user-${receiver[0].name}`).emit('friend-request-declined');
+  }
   res.json({ success: true });
 });
 

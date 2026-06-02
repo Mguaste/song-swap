@@ -169,6 +169,7 @@ function App() {
     loadFriends();
     loadRequests();
     loadUnreadStatus(user);
+    socket.emit('join-user', user.name);
   }, [user]);
 
   useEffect(() => {
@@ -177,7 +178,7 @@ function App() {
     });
     socket.on('song-cleared', () => setReceivedSong(null));
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
-    socket.on('send-success', () => { setSent(true); setTimeout(() => setSent(false), 1500); });
+    socket.on('send-success', () => { setSent(true); setTimeout(() => { setSent(false); setSongLink(''); }, 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('history-updated', (entry) => {
       if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
@@ -187,6 +188,9 @@ function App() {
       }
     });
     socket.on('history-cleared', () => setHistory([]));
+    socket.on('friend-request-received', () => loadRequests());
+    socket.on('friendship-accepted', () => { loadFriends(); loadRequests(); });
+    socket.on('friend-request-declined', () => loadRequests());
     return () => {
       socket.off('song-received');
       socket.off('song-cleared');
@@ -195,6 +199,9 @@ function App() {
       socket.off('duplicate-song');
       socket.off('history-updated');
       socket.off('history-cleared');
+      socket.off('friend-request-received');
+      socket.off('friendship-accepted');
+      socket.off('friend-request-declined');
     };
   }, []);
 
