@@ -422,6 +422,18 @@ app.patch('/api/me/preferred-platform', requireAuth, async (req, res) => {
   res.json({ preferred_platform: platform });
 });
 
+app.patch('/api/me/password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both fields required' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  const { rows } = await pool.query('SELECT password_hash FROM users WHERE name = $1', [req.session.user.name]);
+  const valid = await bcrypt.compare(currentPassword, rows[0].password_hash);
+  if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+  const newHash = await bcrypt.hash(newPassword, 10);
+  await pool.query('UPDATE users SET password_hash = $1 WHERE name = $2', [newHash, req.session.user.name]);
+  res.json({ success: true });
+});
+
 app.post('/api/logout', (req, res) => {
   req.session.destroy();
   res.json({ success: true });

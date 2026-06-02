@@ -96,6 +96,14 @@ function App() {
   const [receivedSong, setReceivedSong] = useState(null);
   const [history, setHistory] = useState([]);
 
+  // Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsPwCurrent, setSettingsPwCurrent] = useState('');
+  const [settingsPwNew, setSettingsPwNew] = useState('');
+  const [settingsPwConfirm, setSettingsPwConfirm] = useState('');
+  const [settingsPwError, setSettingsPwError] = useState('');
+  const [settingsPwSuccess, setSettingsPwSuccess] = useState('');
+
   // Admin
   const [showAdmin, setShowAdmin] = useState(false);
   const [spotifyConnected, setSpotifyConnected] = useState(false);
@@ -351,13 +359,19 @@ function App() {
         </button>
         <img src={icon} id="logo" alt='icon' />
         <h1 id="main-title">
-          {activeFriendship ? activeFriendship.friend_name : 'Song Swap'}
+          {showSettings ? 'Settings' : activeFriendship ? activeFriendship.friend_name : 'Song Swap'}
         </h1>
         <div id="user-info">
           <span id="user-name">{user.name}</span>
           {user.name === 'Mguaste' && (
             <button id="admin-btn" onClick={() => setShowAdmin(v => !v)}>Admin</button>
           )}
+          <button id="settings-btn" onClick={() => setShowSettings(v => !v)} aria-label="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
           <button id="logout-btn" onClick={logout}>Logout</button>
         </div>
       </header>
@@ -390,54 +404,6 @@ function App() {
               </div>
               {addCodeError && <p className="sidebar-feedback error">{addCodeError}</p>}
               {addCodeSuccess && <p className="sidebar-feedback success">{addCodeSuccess}</p>}
-            </div>
-
-            {/* Spotify connection */}
-            <div className="sidebar-section">
-              <p className="sidebar-label">Spotify</p>
-              {spotifyConnected ? (
-                <div className="spotify-status-row">
-                  <span className="spotify-connected-label">Connected</span>
-                  <button
-                    className="copy-btn"
-                    onClick={() =>
-                      fetch('/api/spotify-disconnect', { method: 'DELETE', credentials: 'include' })
-                        .then(() => setSpotifyConnected(false))
-                    }
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              ) : (
-                <a href="/api/spotify-auth" style={{ textDecoration: 'none' }}>
-                  <button className="spotify-connect-btn">Connect Spotify</button>
-                </a>
-              )}
-            </div>
-
-            {/* Preferred platform */}
-            <div className="sidebar-section">
-              <p className="sidebar-label">Open Songs In</p>
-              <select
-                className="platform-select"
-                value={preferredPlatform}
-                onChange={(e) => {
-                  const p = e.target.value;
-                  setPreferredPlatform(p);
-                  fetch('/api/me/preferred-platform', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ platform: p }),
-                  });
-                }}
-              >
-                <option value="spotify">Spotify</option>
-                <option value="appleMusic">Apple Music</option>
-                <option value="youtubeMusic">YouTube Music</option>
-                <option value="amazonMusic">Amazon Music</option>
-                <option value="tidal">Tidal</option>
-              </select>
             </div>
 
             {/* Friend requests */}
@@ -482,12 +448,121 @@ function App() {
         </aside>
 
         <main id="main-content">
-          {!activeFriendship ? (
+          {showSettings ? (
+            <div id="settings-page">
+              <div className="settings-section">
+                <h2 className="settings-section-title">Account</h2>
+                <div className="settings-row">
+                  <label className="settings-label">Change Password</label>
+                  <div className="settings-password-form">
+                    <input
+                      type="password"
+                      placeholder="Current password"
+                      value={settingsPwCurrent}
+                      onChange={e => { setSettingsPwCurrent(e.target.value); setSettingsPwError(''); setSettingsPwSuccess(''); }}
+                    />
+                    <input
+                      type="password"
+                      placeholder="New password"
+                      value={settingsPwNew}
+                      onChange={e => { setSettingsPwNew(e.target.value); setSettingsPwError(''); setSettingsPwSuccess(''); }}
+                    />
+                    <input
+                      type="password"
+                      placeholder="Confirm new password"
+                      value={settingsPwConfirm}
+                      onChange={e => { setSettingsPwConfirm(e.target.value); setSettingsPwError(''); setSettingsPwSuccess(''); }}
+                    />
+                    {settingsPwError && <p className="settings-feedback error">{settingsPwError}</p>}
+                    {settingsPwSuccess && <p className="settings-feedback success">{settingsPwSuccess}</p>}
+                    <button className="settings-save-btn" onClick={async () => {
+                      if (settingsPwNew !== settingsPwConfirm) { setSettingsPwError('New passwords do not match'); return; }
+                      const r = await fetch('/api/me/password', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ currentPassword: settingsPwCurrent, newPassword: settingsPwNew }),
+                      });
+                      const d = await r.json();
+                      if (r.ok) {
+                        setSettingsPwSuccess('Password updated');
+                        setSettingsPwCurrent(''); setSettingsPwNew(''); setSettingsPwConfirm('');
+                      } else {
+                        setSettingsPwError(d.error || 'Failed to update password');
+                      }
+                    }}>Save Password</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <h2 className="settings-section-title">Music</h2>
+                <div className="settings-row">
+                  <label className="settings-label">Open Songs In</label>
+                  <select
+                    className="platform-select"
+                    value={preferredPlatform}
+                    onChange={(e) => {
+                      const p = e.target.value;
+                      setPreferredPlatform(p);
+                      fetch('/api/me/preferred-platform', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ platform: p }),
+                      });
+                    }}
+                  >
+                    <option value="spotify">Spotify</option>
+                    <option value="appleMusic">Apple Music</option>
+                    <option value="youtubeMusic">YouTube Music</option>
+                    <option value="amazonMusic">Amazon Music</option>
+                    <option value="tidal">Tidal</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <h2 className="settings-section-title">Spotify</h2>
+                <div className="settings-row">
+                  <label className="settings-label">Account</label>
+                  {spotifyConnected ? (
+                    <div className="spotify-status-row">
+                      <span className="spotify-connected-label">Connected</span>
+                      <button className="copy-btn" onClick={() =>
+                        fetch('/api/spotify-disconnect', { method: 'DELETE', credentials: 'include' })
+                          .then(() => setSpotifyConnected(false))
+                      }>Disconnect</button>
+                    </div>
+                  ) : (
+                    <a href="/api/spotify-auth" style={{ textDecoration: 'none' }}>
+                      <button className="spotify-connect-btn">Connect Spotify</button>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {user.name === 'Mguaste' && (
+                <div className="settings-section">
+                  <h2 className="settings-section-title">Admin</h2>
+                  <div className="settings-row">
+                    <label className="settings-label">History</label>
+                    <button className="settings-danger-btn" onClick={() => fetch('/api/admin/history', { method: 'DELETE', credentials: 'include' })}>Clear All History</button>
+                  </div>
+                  <div className="settings-row">
+                    <label className="settings-label">Current Songs</label>
+                    <button className="settings-danger-btn" onClick={() => fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' })}>Clear Current Songs</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : !activeFriendship ? (
             <div id="empty-state">
               <img src={icon} id="empty-logo" alt="icon" />
               <p>Select a friend to start swapping songs</p>
             </div>
           ) : (
+
             <>
               <div id="song-swap-main">
                 <div className="song-cont">
@@ -586,13 +661,6 @@ function App() {
                 </div>
               )}
 
-              {showAdmin && (
-                <div id="admin-panel">
-                  <h2 id="admin-title">Admin</h2>
-                  <button onClick={() => fetch('/api/admin/history', { method: 'DELETE', credentials: 'include' })}>Clear All History</button>
-                  <button onClick={() => fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' })}>Clear Current Songs</button>
-                </div>
-              )}
             </>
           )}
         </main>
