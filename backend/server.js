@@ -220,11 +220,14 @@ const requireAdmin = (req, res, next) => {
 };
 
 app.post('/api/register', async (req, res) => {
-  const { name, password } = req.body;
+  const { name, password, preferredPlatform } = req.body;
   const trimmed = name?.trim();
   if (!trimmed || !password) return res.status(400).json({ error: 'Name and password required' });
   if (trimmed.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+  const VALID_PLATFORMS = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
+  const platform = VALID_PLATFORMS.includes(preferredPlatform) ? preferredPlatform : 'spotify';
 
   const { rows: existing } = await pool.query('SELECT id FROM users WHERE LOWER(name) = LOWER($1)', [trimmed]);
   if (existing.length > 0) return res.status(409).json({ error: 'Username already taken' });
@@ -237,7 +240,10 @@ app.post('/api/register', async (req, res) => {
     unique = rows.length === 0;
   }
 
-  await pool.query('INSERT INTO users (name, password_hash, friend_code) VALUES ($1, $2, $3)', [trimmed, passwordHash, code]);
+  await pool.query(
+    'INSERT INTO users (name, password_hash, friend_code, preferred_platform) VALUES ($1, $2, $3, $4)',
+    [trimmed, passwordHash, code, platform]
+  );
   req.session.user = { name: trimmed };
   res.status(201).json({ name: trimmed });
 });

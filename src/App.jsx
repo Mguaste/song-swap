@@ -46,6 +46,7 @@ function RegisterForm({ onLogin }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [preferredPlatform, setPreferredPlatform] = useState('spotify');
   const [error, setError] = useState('');
 
   const submit = async (e) => {
@@ -55,7 +56,7 @@ function RegisterForm({ onLogin }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ name, password }),
+      body: JSON.stringify({ name, password, preferredPlatform }),
     });
     if (res.ok) onLogin();
     else setError((await res.json()).error || 'Registration failed');
@@ -66,6 +67,13 @@ function RegisterForm({ onLogin }) {
       <input placeholder="Username" value={name} onChange={e => setName(e.target.value)} />
       <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
       <input type="password" placeholder="Confirm Password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+      <select value={preferredPlatform} onChange={e => setPreferredPlatform(e.target.value)} className="register-platform-select">
+        <option value="spotify">Spotify</option>
+        <option value="appleMusic">Apple Music</option>
+        <option value="youtubeMusic">YouTube Music</option>
+        <option value="amazonMusic">Amazon Music</option>
+        <option value="tidal">Tidal</option>
+      </select>
       {error && <p id="login-error">{error}</p>}
       <button type="submit">Sign Up</button>
     </form>
