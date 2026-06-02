@@ -244,7 +244,18 @@ function App() {
 
   const PLATFORM_PRIORITY = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
 
-  const openWithLinks = (platformLinks, odesliPageUrl) => {
+  const buildSearchUrl = (platform, title, artist) => {
+    const q = encodeURIComponent(`${title} ${artist}`);
+    switch (platform) {
+      case 'appleMusic':    return `https://music.apple.com/search?term=${q}`;
+      case 'youtubeMusic':  return `https://music.youtube.com/search?q=${q}`;
+      case 'tidal':         return `https://listen.tidal.com/search?q=${q}`;
+      case 'amazonMusic':   return `https://music.amazon.com/search/${q}`;
+      default:              return null;
+    }
+  };
+
+  const openWithLinks = (platformLinks, song) => {
     const preferred = platformLinks[preferredPlatform];
     if (preferred?.url) {
       if (preferredPlatform === 'spotify' && preferred.nativeAppUriMobile) {
@@ -255,17 +266,23 @@ function App() {
       }
       return;
     }
+    // Preferred platform not in API response — use search URL if we have metadata
+    if (song?.title && song?.artist) {
+      const searchUrl = buildSearchUrl(preferredPlatform, song.title, song.artist);
+      if (searchUrl) { window.open(searchUrl, '_blank'); return; }
+    }
+    // Final fallback: best available direct link
     for (const p of PLATFORM_PRIORITY) {
       const link = platformLinks[p];
       if (link?.url) { window.open(link.url, '_blank'); return; }
     }
-    if (odesliPageUrl) window.open(odesliPageUrl, '_blank');
+    if (song?.odesliPageUrl) window.open(song.odesliPageUrl, '_blank');
   };
 
   const openSong = async (song) => {
     if (!song) return;
     if (song.platformLinks) {
-      openWithLinks(song.platformLinks, song.odesliPageUrl);
+      openWithLinks(song.platformLinks, song);
       return;
     }
     // Legacy song (no platformLinks) — resolve via odesli if user prefers non-Spotify
@@ -279,7 +296,7 @@ function App() {
         });
         if (res.ok) {
           const resolved = await res.json();
-          if (resolved.platformLinks) { openWithLinks(resolved.platformLinks, resolved.odesliPageUrl); return; }
+          if (resolved.platformLinks) { openWithLinks(resolved.platformLinks, { ...resolved, ...song }); return; }
         }
       } catch {}
     }
