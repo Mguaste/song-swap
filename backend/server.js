@@ -62,6 +62,10 @@ const initDb = async () => {
   `);
   await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS spotify_playlist_id TEXT');
   await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS playlist_creating BOOLEAN DEFAULT FALSE');
+  await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS platform_links JSONB');
+  await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS source_url TEXT');
+  await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS odesli_page_url TEXT');
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_platform TEXT DEFAULT 'spotify'");
 
   // Generate friend codes for existing users that don't have one
   const { rows: needsCodes } = await pool.query('SELECT id FROM users WHERE friend_code IS NULL');
@@ -317,21 +321,32 @@ io.on('connection', (socket) => {
 
   socket.on('send-song', async ({ song, sentBy, friendshipId }) => {
     const { rows: dup } = await pool.query(
-      'SELECT * FROM song_history WHERE spotify_uri = $1 AND friendship_id = $2',
-      [song.spotifyUri, friendshipId]
+      `SELECT * FROM song_history WHERE friendship_id = $1
+       AND (
+         (odesli_page_url IS NOT NULL AND odesli_page_url = $2)
+         OR (odesli_page_url IS NULL AND spotify_uri IS NOT NULL AND spotify_uri = $3)
+       )`,
+      [friendshipId, song.odesliPageUrl ?? null, song.spotifyUri ?? null]
     );
     if (dup.length > 0) {
       const d = dup[0];
       socket.emit('duplicate-song', {
         title: d.title, artist: d.artist, album: d.album,
         albumArt: d.album_art, spotifyUri: d.spotify_uri,
-        spotifyUrl: d.spotify_url, sentBy: d.sent_by, sentAt: d.sent_at,
+        spotifyUrl: d.spotify_url, platformLinks: d.platform_links ?? null,
+        sourceUrl: d.source_url ?? null, odesliPageUrl: d.odesli_page_url ?? null,
+        sentBy: d.sent_by, sentAt: d.sent_at,
       });
       return;
     }
     await pool.query(
-      'INSERT INTO song_history (title, artist, album, album_art, spotify_uri, spotify_url, sent_by, friendship_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [song.title, song.artist, song.album, song.albumArt, song.spotifyUri, song.spotifyUrl, sentBy, friendshipId]
+      `INSERT INTO song_history
+        (title, artist, album, album_art, spotify_uri, spotify_url,
+         platform_links, source_url, odesli_page_url, sent_by, friendship_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [song.title, song.artist, song.album, song.albumArt, song.spotifyUri ?? null,
+       song.spotifyUrl ?? null, song.platformLinks ? JSON.stringify(song.platformLinks) : null,
+       song.sourceUrl ?? null, song.odesliPageUrl ?? null, sentBy, friendshipId]
     );
     const entry = { ...song, sentBy, sentAt: new Date().toISOString(), friendshipId };
     if (!lastSentByFriendship[friendshipId]) lastSentByFriendship[friendshipId] = {};
@@ -339,28 +354,14 @@ io.on('connection', (socket) => {
     socket.emit('send-success');
     socket.to(`friendship-${friendshipId}`).emit('song-received', { ...song, friendshipId });
     io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
-    addTrackToFriendshipPlaylist(friendshipId, song.spotifyUri).catch(err => console.error('Playlist track add failed:', err));
+    if (song.spotifyUri) {
+      addTrackToFriendshipPlaylist(friendshipId, song.spotifyUri).catch(err => console.error('Playlist track add failed:', err));
+    }
   });
 
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
 });
 
-const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
-const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
-
-const getSpotifyAccessToken = async () => {
-  const response = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Basic ${Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64')}`,
-    },
-    body: 'grant_type=client_credentials',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(JSON.stringify(data));
-  return data.access_token;
-};
 
 const requireAuth = (req, res, next) => {
   if (req.session.user) return next();
@@ -406,8 +407,19 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/me', requireAuth, async (req, res) => {
-  const { rows } = await pool.query('SELECT name, friend_code FROM users WHERE name = $1', [req.session.user.name]);
+  const { rows } = await pool.query(
+    "SELECT name, friend_code, COALESCE(preferred_platform, 'spotify') AS preferred_platform FROM users WHERE name = $1",
+    [req.session.user.name]
+  );
   res.json(rows[0]);
+});
+
+app.patch('/api/me/preferred-platform', requireAuth, async (req, res) => {
+  const VALID = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
+  const { platform } = req.body;
+  if (!VALID.includes(platform)) return res.status(400).json({ error: 'Invalid platform' });
+  await pool.query('UPDATE users SET preferred_platform = $1 WHERE name = $2', [platform, req.session.user.name]);
+  res.json({ preferred_platform: platform });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -523,8 +535,9 @@ app.get('/api/friends/:id/history', requireAuth, async (req, res) => {
   );
   res.json(rows.map(r => ({
     title: r.title, artist: r.artist, album: r.album,
-    albumArt: r.album_art, spotifyUri: r.spotify_uri,
-    spotifyUrl: r.spotify_url, sentBy: r.sent_by, sentAt: r.sent_at,
+    albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
+    platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
+    odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
   })));
 });
 
@@ -548,8 +561,9 @@ app.get('/api/history', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM song_history ORDER BY sent_at ASC');
   res.json(rows.map(r => ({
     title: r.title, artist: r.artist, album: r.album,
-    albumArt: r.album_art, spotifyUri: r.spotify_uri,
-    spotifyUrl: r.spotify_url, sentBy: r.sent_by, sentAt: r.sent_at,
+    albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
+    platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
+    odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
   })));
 });
 
@@ -650,25 +664,39 @@ if (fs.existsSync(DIST)) {
 
 app.post('/api/verify', requireAuth, async (req, res) => {
   const { link } = req.body;
-  const songId = link.split('/track/')[1]?.split('?')[0];
-  if (!songId) return res.status(400).json({ error: 'Invalid Spotify link' });
+  if (!link) return res.status(400).json({ error: 'Link required' });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    const accessToken = await getSpotifyAccessToken();
-    const response = await fetch(`https://api.spotify.com/v1/tracks/${songId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json(data);
+    const headers = {};
+    if (process.env.ODESLI_API_KEY) headers['x-api-key'] = process.env.ODESLI_API_KEY;
+    const oRes = await fetch(
+      `https://api.odesli.co/resolve?url=${encodeURIComponent(link)}&userCountry=US`,
+      { signal: controller.signal, headers }
+    );
+    clearTimeout(timeout);
+    if (oRes.status === 404) return res.status(404).json({ error: 'Song not found on any platform' });
+    if (oRes.status === 429) return res.status(429).json({ error: 'Rate limited — try again in a moment' });
+    if (!oRes.ok) return res.status(502).json({ error: 'Music lookup service unavailable' });
+    const data = await oRes.json();
+    const entity = data.entitiesByUniqueId?.[data.entityUniqueId];
+    if (!entity) return res.status(404).json({ error: 'Song not found' });
+    const spotifyLinks = data.linksByPlatform?.spotify ?? null;
     res.json({
-      title: data.name,
-      artist: data.artists[0].name,
-      album: data.album.name,
-      albumArt: data.album.images[0].url,
-      spotifyUri: data.uri,
-      spotifyUrl: data.external_urls.spotify,
+      title: entity.title,
+      artist: entity.artistName,
+      album: entity.albumName ?? null,
+      albumArt: entity.thumbnailUrl ?? null,
+      spotifyUri: spotifyLinks?.nativeAppUriMobile ?? null,
+      spotifyUrl: spotifyLinks?.url ?? null,
+      platformLinks: data.linksByPlatform ?? {},
+      sourceUrl: link,
+      odesliPageUrl: data.pageUrl ?? null,
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch song details', details: error.message });
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err.name === 'AbortError') return res.status(504).json({ error: 'Music lookup timed out' });
+    res.status(502).json({ error: 'Music lookup service unavailable' });
   }
 });
 
@@ -681,8 +709,9 @@ initDb().then(async () => {
     if (!lastSentByFriendship[r.friendship_id]) lastSentByFriendship[r.friendship_id] = {};
     lastSentByFriendship[r.friendship_id][r.sent_by] = {
       title: r.title, artist: r.artist, album: r.album,
-      albumArt: r.album_art, spotifyUri: r.spotify_uri,
-      spotifyUrl: r.spotify_url, sentBy: r.sent_by, sentAt: r.sent_at,
+      albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
+      platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
+      odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
     };
   }
   server.listen(PORT, () => {
