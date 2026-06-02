@@ -244,14 +244,8 @@ function App() {
 
   const PLATFORM_PRIORITY = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
 
-  const openSong = (song) => {
-    if (!song) return;
-    if (!song.platformLinks) {
-      if (song.spotifyUri) window.location.href = song.spotifyUri;
-      setTimeout(() => { if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank'); }, 1000);
-      return;
-    }
-    const preferred = song.platformLinks[preferredPlatform];
+  const openWithLinks = (platformLinks, odesliPageUrl) => {
+    const preferred = platformLinks[preferredPlatform];
     if (preferred?.url) {
       if (preferredPlatform === 'spotify' && preferred.nativeAppUriMobile) {
         window.location.href = preferred.nativeAppUriMobile;
@@ -262,10 +256,36 @@ function App() {
       return;
     }
     for (const p of PLATFORM_PRIORITY) {
-      const link = song.platformLinks[p];
+      const link = platformLinks[p];
       if (link?.url) { window.open(link.url, '_blank'); return; }
     }
-    if (song.odesliPageUrl) window.open(song.odesliPageUrl, '_blank');
+    if (odesliPageUrl) window.open(odesliPageUrl, '_blank');
+  };
+
+  const openSong = async (song) => {
+    if (!song) return;
+    if (song.platformLinks) {
+      openWithLinks(song.platformLinks, song.odesliPageUrl);
+      return;
+    }
+    // Legacy song (no platformLinks) — resolve via odesli if user prefers non-Spotify
+    if (preferredPlatform !== 'spotify' && song.spotifyUrl) {
+      try {
+        const res = await fetch('/api/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ link: song.spotifyUrl }),
+        });
+        if (res.ok) {
+          const resolved = await res.json();
+          if (resolved.platformLinks) { openWithLinks(resolved.platformLinks, resolved.odesliPageUrl); return; }
+        }
+      } catch {}
+    }
+    // Fallback: open in Spotify
+    if (song.spotifyUri) window.location.href = song.spotifyUri;
+    setTimeout(() => { if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank'); }, 1000);
   };
 
   const verifySong = async () => {
