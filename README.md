@@ -1,3 +1,7 @@
+## Donate
+If you are so kind and would like to donate please visit my KOFI:
+https://ko-fi.com/mguaste
+
 # Song Swap
 
 //### Client-Requirements:
