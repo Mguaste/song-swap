@@ -314,12 +314,6 @@ function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const openSong = (song) => {
-    if (!song) return;
-    window.location.href = song.spotifyUri;
-    setTimeout(() => { window.open(song.spotifyUrl, '_blank'); }, 1000);
-  };
-
   const logout = () => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(() => {
     setUser(null);
     setActiveFriendship(null);
