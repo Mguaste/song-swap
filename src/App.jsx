@@ -481,6 +481,8 @@ function App() {
                 ))
               )}
             </div>
+          <div id="sidebar-footer">
+            <a href="https://ko-fi.com/mguaste" target="_blank" rel="noreferrer" id="kofi-link">Support on Ko-fi</a>
           </div>
         </aside>
 
