@@ -683,7 +683,7 @@ app.post('/api/verify', requireAuth, async (req, res) => {
     const headers = {};
     if (process.env.ODESLI_API_KEY) headers['x-api-key'] = process.env.ODESLI_API_KEY;
     const oRes = await fetch(
-      `https://api.odesli.co/resolve?url=${encodeURIComponent(link)}&userCountry=US`,
+      `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}&userCountry=US`,
       { signal: controller.signal, headers }
     );
     clearTimeout(timeout);
