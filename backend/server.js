@@ -354,7 +354,7 @@ app.get('/api/friends', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT f.id AS friendship_id,
        CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name,
-       CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code,
+       CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code
      FROM friendships f
      JOIN users u1 ON u1.id = f.requester_id
      JOIN users u2 ON u2.id = f.receiver_id
