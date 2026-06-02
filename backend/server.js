@@ -674,6 +674,29 @@ if (fs.existsSync(DIST)) {
   app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
+const searchItunes = async (title, artist) => {
+  try {
+    const q = encodeURIComponent(`${title} ${artist}`);
+    const res = await fetch(`https://itunes.apple.com/search?term=${q}&entity=song&limit=1`);
+    const data = await res.json();
+    const url = data.results?.[0]?.trackViewUrl;
+    return url ? { url } : null;
+  } catch { return null; }
+};
+
+const searchYouTubeMusic = async (title, artist) => {
+  if (!process.env.YOUTUBE_API_KEY) return null;
+  try {
+    const q = encodeURIComponent(`${title} ${artist}`);
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${q}&type=video&videoCategoryId=10&maxResults=1&key=${process.env.YOUTUBE_API_KEY}`
+    );
+    const data = await res.json();
+    const videoId = data.items?.[0]?.id?.videoId;
+    return videoId ? { url: `https://music.youtube.com/watch?v=${videoId}` } : null;
+  } catch { return null; }
+};
+
 app.post('/api/verify', requireAuth, async (req, res) => {
   const { link } = req.body;
   if (!link) return res.status(400).json({ error: 'Link required' });
@@ -693,7 +716,18 @@ app.post('/api/verify', requireAuth, async (req, res) => {
     const data = await oRes.json();
     const entity = data.entitiesByUniqueId?.[data.entityUniqueId];
     if (!entity) return res.status(404).json({ error: 'Song not found' });
-    const spotifyLinks = data.linksByPlatform?.spotify ?? null;
+
+    const platformLinks = { ...(data.linksByPlatform ?? {}) };
+
+    // Fill in Apple Music and YouTube Music if song.link didn't return them
+    const [itunesResult, ytResult] = await Promise.all([
+      platformLinks.appleMusic ? null : searchItunes(entity.title, entity.artistName),
+      platformLinks.youtubeMusic ? null : searchYouTubeMusic(entity.title, entity.artistName),
+    ]);
+    if (itunesResult) platformLinks.appleMusic = itunesResult;
+    if (ytResult) platformLinks.youtubeMusic = ytResult;
+
+    const spotifyLinks = platformLinks.spotify ?? null;
     res.json({
       title: entity.title,
       artist: entity.artistName,
@@ -701,7 +735,7 @@ app.post('/api/verify', requireAuth, async (req, res) => {
       albumArt: entity.thumbnailUrl ?? null,
       spotifyUri: spotifyLinks?.nativeAppUriMobile ?? null,
       spotifyUrl: spotifyLinks?.url ?? null,
-      platformLinks: data.linksByPlatform ?? {},
+      platformLinks,
       sourceUrl: link,
       odesliPageUrl: data.pageUrl ?? null,
     });
