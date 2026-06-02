@@ -247,6 +247,7 @@ function App() {
   const buildSearchUrl = (platform, title, artist) => {
     const q = encodeURIComponent(`${title} ${artist}`);
     switch (platform) {
+      case 'spotify':       return `https://open.spotify.com/search/${q}`;
       case 'appleMusic':    return `https://music.apple.com/search?term=${q}`;
       case 'youtubeMusic':  return `https://music.youtube.com/search?q=${q}`;
       case 'tidal':         return `https://listen.tidal.com/search?q=${q}`;
