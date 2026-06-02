@@ -106,7 +106,6 @@ function App() {
 
   // Admin
   const [showAdmin, setShowAdmin] = useState(false);
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [preferredPlatform, setPreferredPlatform] = useState('spotify');
   const [verifyError, setVerifyError] = useState('');
 
@@ -157,26 +156,11 @@ function App() {
   useEffect(() => { loadMe(); }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('spotify') === 'connected') {
-      window.history.replaceState({}, '', '/');
-      loadMe().then(() => {
-        fetch('/api/spotify-status', { credentials: 'include' })
-          .then(r => r.json())
-          .then(data => setSpotifyConnected(data.connected));
-      });
-    }
-  }, []);
-
-  useEffect(() => {
     userRef.current = user;
     if (!user) return;
     loadFriends();
     loadRequests();
     loadUnreadStatus(user);
-    fetch('/api/spotify-status', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => setSpotifyConnected(data.connected));
   }, [user]);
 
   useEffect(() => {
@@ -560,26 +544,6 @@ function App() {
                 </div>
               </div>
 
-              <div className="settings-section">
-                <h2 className="settings-section-title">Spotify</h2>
-                <div className="settings-row">
-                  <label className="settings-label">Account</label>
-                  {spotifyConnected ? (
-                    <div className="spotify-status-row">
-                      <span className="spotify-connected-label">Connected</span>
-                      <button className="copy-btn" onClick={() =>
-                        fetch('/api/spotify-disconnect', { method: 'DELETE', credentials: 'include' })
-                          .then(() => setSpotifyConnected(false))
-                      }>Disconnect</button>
-                    </div>
-                  ) : (
-                    <a href="/api/spotify-auth" style={{ textDecoration: 'none' }}>
-                      <button className="spotify-connect-btn">Connect Spotify</button>
-                    </a>
-                  )}
-                </div>
-              </div>
-
               {user.name === 'Mguaste' && (
                 <div className="settings-section">
                   <h2 className="settings-section-title">Admin</h2>
@@ -661,25 +625,6 @@ function App() {
                   </div>
                 </div>
               </div>
-
-              {activeFriendship.spotify_playlist_id ? (
-                <div id="friendship-playlist">
-                  <a
-                    href={`https://open.spotify.com/playlist/${activeFriendship.spotify_playlist_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="playlist-link"
-                  >
-                    Open shared playlist on Spotify
-                  </a>
-                </div>
-              ) : spotifyConnected ? (
-                <p className="playlist-prompt">Waiting for {activeFriendship.friend_name} to connect Spotify&hellip;</p>
-              ) : (
-                <p className="playlist-prompt">
-                  <a href="/api/spotify-auth" className="link-btn">Connect Spotify</a> to create a shared playlist with {activeFriendship.friend_name}
-                </p>
-              )}
 
               {history.length > 0 && (
                 <div id="history">
