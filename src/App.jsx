@@ -88,7 +88,7 @@ function App() {
   const [copied, setCopied] = useState(false);
 
   // Swap lane
-  const [spotifyLink, setSpotifyLink] = useState('');
+  const [songLink, setSongLink] = useState('');
   const [sent, setSent] = useState(false);
   const [denied, setDenied] = useState(false);
   const [duplicate, setDuplicate] = useState(null);
@@ -99,6 +99,8 @@ function App() {
   // Admin
   const [showAdmin, setShowAdmin] = useState(false);
   const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [preferredPlatform, setPreferredPlatform] = useState('spotify');
+  const [verifyError, setVerifyError] = useState('');
 
   // Unread tracking
   const [unreadFriendships, setUnreadFriendships] = useState(new Set());
@@ -106,7 +108,13 @@ function App() {
 
   const loadMe = async () => {
     const r = await fetch('/api/me', { credentials: 'include' });
-    setUser(r.ok ? await r.json() : null);
+    if (r.ok) {
+      const data = await r.json();
+      setUser(data);
+      setPreferredPlatform(data.preferred_platform ?? 'spotify');
+    } else {
+      setUser(null);
+    }
   };
 
   const loadFriends = async () => {
@@ -196,8 +204,9 @@ function App() {
     setActiveFriendship(fresh);
     activeFriendshipRef.current = fresh;
     if (window.innerWidth <= 700) setSidebarOpen(false);
-    setSpotifyLink('');
+    setSongLink('');
     setSongDetails(null);
+    setVerifyError('');
     setDuplicate(null);
     setReceivedSong(null);
     setHistory([]);
@@ -225,17 +234,47 @@ function App() {
     }
   };
 
+  const PLATFORM_PRIORITY = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
+
+  const openSong = (song) => {
+    if (!song) return;
+    if (!song.platformLinks) {
+      if (song.spotifyUri) window.location.href = song.spotifyUri;
+      setTimeout(() => { if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank'); }, 1000);
+      return;
+    }
+    const preferred = song.platformLinks[preferredPlatform];
+    if (preferred?.url) {
+      if (preferredPlatform === 'spotify' && preferred.nativeAppUriMobile) {
+        window.location.href = preferred.nativeAppUriMobile;
+        setTimeout(() => window.open(preferred.url, '_blank'), 1000);
+      } else {
+        window.open(preferred.url, '_blank');
+      }
+      return;
+    }
+    for (const p of PLATFORM_PRIORITY) {
+      const link = song.platformLinks[p];
+      if (link?.url) { window.open(link.url, '_blank'); return; }
+    }
+    if (song.odesliPageUrl) window.open(song.odesliPageUrl, '_blank');
+  };
+
   const verifySong = async () => {
+    setVerifyError('');
+    setSongDetails(null);
     try {
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ link: spotifyLink }),
+        body: JSON.stringify({ link: songLink }),
       });
-      setSongDetails(await res.json());
-    } catch (err) {
-      console.error('Error verifying song:', err);
+      const data = await res.json();
+      if (!res.ok) { setVerifyError(data.error || 'Could not find that song'); return; }
+      setSongDetails(data);
+    } catch {
+      setVerifyError('Network error — check your connection');
     }
   };
 
@@ -275,7 +314,7 @@ function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const openInSpotify = (song) => {
+  const openSong = (song) => {
     if (!song) return;
     window.location.href = song.spotifyUri;
     setTimeout(() => { window.open(song.spotifyUrl, '_blank'); }, 1000);
@@ -382,6 +421,31 @@ function App() {
               )}
             </div>
 
+            {/* Preferred platform */}
+            <div className="sidebar-section">
+              <p className="sidebar-label">Open Songs In</p>
+              <select
+                className="platform-select"
+                value={preferredPlatform}
+                onChange={(e) => {
+                  const p = e.target.value;
+                  setPreferredPlatform(p);
+                  fetch('/api/me/preferred-platform', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ platform: p }),
+                  });
+                }}
+              >
+                <option value="spotify">Spotify</option>
+                <option value="appleMusic">Apple Music</option>
+                <option value="youtubeMusic">YouTube Music</option>
+                <option value="amazonMusic">Amazon Music</option>
+                <option value="tidal">Tidal</option>
+              </select>
+            </div>
+
             {/* Friend requests */}
             {friendRequests.length > 0 && (
               <div className="sidebar-section">
@@ -434,7 +498,7 @@ function App() {
               <div id="song-swap-main">
                 <div className="song-cont">
                   <h2 className="song-cont-title">Send</h2>
-                  <div className="song-info" onClick={() => openInSpotify(songDetails)} style={songDetails ? {cursor: 'pointer'} : {}}>
+                  <div className="song-info" onClick={() => openSong(songDetails)} style={songDetails ? {cursor: 'pointer'} : {}}>
                     <div className={`send-art-wrapper${sent ? ' sending' : ''}${denied ? ' denied' : ''}`}>
                       <div className="send-art-inner">
                         {songDetails
@@ -460,15 +524,16 @@ function App() {
                   </div>
                   <div className="input-group">
                     <input
-                      placeholder="Paste Spotify Link"
-                      value={spotifyLink}
-                      onChange={(e) => { setSpotifyLink(e.target.value); setSongDetails(null); setDuplicate(null); }}
+                      placeholder="Paste a music link..."
+                      value={songLink}
+                      onChange={(e) => { setSongLink(e.target.value); setSongDetails(null); setDuplicate(null); setVerifyError(''); }}
                       onKeyDown={(e) => { if (e.key === 'Enter') songDetails ? sendSong() : verifySong(); }}
                     />
                     <button onClick={songDetails ? sendSong : verifySong} disabled={sent || denied}>
                       {songDetails ? 'Send' : 'Verify'}
                     </button>
                   </div>
+                  {verifyError && <p id="duplicate-warning">{verifyError}</p>}
                   {duplicate && (
                     <p id="duplicate-warning">
                       Already sent on {new Date(duplicate.sentAt).toLocaleDateString()} by {duplicate.sentBy}
@@ -478,7 +543,7 @@ function App() {
 
                 <div className="song-cont">
                   <h2 className="song-cont-title">Receive</h2>
-                  <div className="song-info" onClick={() => openInSpotify(receivedSong)} style={receivedSong ? {cursor: 'pointer'} : {}}>
+                  <div className="song-info" onClick={() => openSong(receivedSong)} style={receivedSong ? {cursor: 'pointer'} : {}}>
                     {receivedSong
                       ? <img className="album-art" src={receivedSong.albumArt} alt="Album Art" />
                       : <AlbumArtPlaceholder />
@@ -514,7 +579,7 @@ function App() {
                   <h2 id="history-title">History</h2>
                   <div id="history-list">
                     {history.map((entry, i) => (
-                      <div key={i} className="history-entry" onClick={() => openInSpotify(entry)}>
+                      <div key={i} className="history-entry" onClick={() => openSong(entry)}>
                         <span className="history-index">{history.length - i}</span>
                         <img src={entry.albumArt} alt="art" className="history-art" />
                         <div className="history-info">
