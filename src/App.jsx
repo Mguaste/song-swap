@@ -161,7 +161,7 @@ function LandingPage({ onLogin, onSignup }) {
 
       <section id="landing-hero">
         <img src={icon} id="landing-hero-logo" alt="Song Swap" />
-        <h1>Share the songs you love<br/>with the people you love.</h1>
+        <h1>Share the songs you love <br/>with the people you love.</h1>
         <p className="landing-hero-sub">
           Song Swap is a simple way to trade music with friends — one track at a time,
           on whatever app you already use.
