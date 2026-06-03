@@ -82,8 +82,8 @@ function RegisterForm({ onLogin }) {
 
 const FEATURES = [
   {
-    title: 'One song a day',
-    body: 'Trade a single track with each friend, every day. No endless feeds — just one song worth sharing.',
+    title: 'One song at a time',
+    body: 'Trade a single track at a time.',
     icon: (
       <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
     ),
@@ -161,7 +161,7 @@ function LandingPage({ onLogin, onSignup }) {
 
       <section id="landing-hero">
         <img src={icon} id="landing-hero-logo" alt="Song Swap" />
-        <h1>Share one song a day<br />with the people you love.</h1>
+        <h1>Share the songs you love<br />with the people you love.</h1>
         <p className="landing-hero-sub">
           Song Swap is a simple way to trade music with friends — one track at a time,
           on whatever app you already use.
