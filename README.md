@@ -5,22 +5,22 @@ https://ko-fi.com/mguaste
 # Song Swap
 
 //### Client-Requirements:
-//* must be able to paste Spotify link 
-//* Must Use SSL certificate for use at work
+//* [x] must be able to paste Spotify link 
+//* [x] Must Use SSL certificate for use at work
 
 ### Quality of life Goals:
-//* History/Duplicate Check
-//* Auto upload to Spotify Playlist
+//* [x] History/Duplicate Check
+//* [ ]Auto upload to Spotify Playlist -# may be optional/ not forced because of various service integration
 
-
-//### Cool Ideas:
-//* Logo that riffs off of Spotify Logo/ Uno Reverse symbol
+### Immediate needs
+* landing page
 
 ### user feedback/bugs/fixes
-* Clear URL after send!!!
-* Spotity integration not working. 
-* make playlist optional
-* auto push updates for friend stuff.
+* [x] Clear URL after send!!!
+* Spotity integration not working. -# not needed based on multi-platform integration
+* [x] make playlist optional 
+-# playlist not supported because of multi-platform integration
+* [x] auto push updates for friend stuff.
 
 
 ### stretch Goals
