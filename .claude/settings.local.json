@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git -c user.name=Mguaste -c user.email=marcusbower02@gmail.com commit -m 'Harden server and add site trust files: security headers, auth rate limiting, robots.txt, sitemap, security.txt *)",
+      "Bash(git push *)"
+    ]
+  }
+}
