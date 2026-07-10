@@ -179,7 +179,7 @@ function LandingPage({ onLogin, onSignup }) {
           {FEATURES.map(f => (
             <div className="landing-feature" key={f.title}>
               <div className="landing-feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#1DB954" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
                   {f.icon}
                 </svg>
               </div>
