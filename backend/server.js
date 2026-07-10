@@ -113,6 +113,7 @@ const initDb = async () => {
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 const server = http.createServer(app);
 const ALLOWED_ORIGINS = [
   /^http:\/\/localhost(:\d+)?$/,
@@ -147,6 +148,16 @@ const scheduleMidnightClear = () => {
     scheduleMidnightClear();
   }, midnight - now);
 };
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(bodyParser.json());
@@ -223,7 +234,24 @@ const requireAdmin = (req, res, next) => {
   res.status(403).json({ error: 'Forbidden' });
 };
 
-app.post('/api/register', async (req, res) => {
+// Per-IP throttle on auth endpoints: 15 attempts per 15 minutes
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const authAttempts = new Map();
+const authLimiter = (req, res, next) => {
+  const now = Date.now();
+  const entry = authAttempts.get(req.ip) ?? { count: 0, start: now };
+  if (now - entry.start > AUTH_WINDOW_MS) { entry.count = 0; entry.start = now; }
+  entry.count++;
+  authAttempts.set(req.ip, entry);
+  if (entry.count > 15) return res.status(429).json({ error: 'Too many attempts — try again in a few minutes' });
+  next();
+};
+setInterval(() => {
+  const cutoff = Date.now() - AUTH_WINDOW_MS;
+  for (const [ip, e] of authAttempts) if (e.start < cutoff) authAttempts.delete(ip);
+}, AUTH_WINDOW_MS).unref();
+
+app.post('/api/register', authLimiter, async (req, res) => {
   const { name, password, preferredPlatform } = req.body;
   const trimmed = name?.trim();
   if (!trimmed || !password) return res.status(400).json({ error: 'Name and password required' });
@@ -252,7 +280,7 @@ app.post('/api/register', async (req, res) => {
   res.status(201).json({ name: trimmed });
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', authLimiter, async (req, res) => {
   const { name, password } = req.body;
   const { rows } = await pool.query('SELECT * FROM users WHERE LOWER(name) = LOWER($1)', [name]);
   if (rows.length === 0) return res.status(401).json({ error: 'Invalid username or password' });
@@ -463,7 +491,7 @@ app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
 
 const DIST = path.join(__dirname, '../dist');
 if (fs.existsSync(DIST)) {
-  app.use(express.static(DIST));
+  app.use(express.static(DIST, { dotfiles: 'allow' }));
   app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
