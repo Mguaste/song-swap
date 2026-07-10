@@ -210,8 +210,20 @@ function LandingPage({ onLogin, onSignup }) {
       </section>
 
       <footer id="landing-footer">
-        <span>Song Swap</span>
-        <a href="https://ko-fi.com/mguaste" target="_blank" rel="noreferrer">Support on Ko-fi</a>
+        <div className="landing-footer-row">
+          <span>© 2026 Song Swap</span>
+          <nav className="landing-footer-links">
+            <a href="/privacy.html">Privacy</a>
+            <a href="/terms.html">Terms</a>
+            <a href="https://github.com/Mguaste/song-swap" target="_blank" rel="noreferrer">GitHub</a>
+            <a href="https://ko-fi.com/mguaste" target="_blank" rel="noreferrer">Support on Ko-fi</a>
+          </nav>
+        </div>
+        <p className="landing-disclaimer">
+          Song Swap is an independent project and is not affiliated with, endorsed by, or connected to
+          Spotify, Apple, Google, Amazon, or Tidal. Platform names are used only to describe which
+          services' song links the app can open. We never ask for your credentials to any other service.
+        </p>
       </footer>
     </div>
   );
@@ -516,7 +528,9 @@ function App() {
       <div id="login-card">
         <img src={icon} id="login-logo" alt="icon" />
         <h1 id="login-title">Song Swap</h1>
-        <p id="login-subtitle">Community in Music</p>
+        <p id="login-subtitle">
+          {authMode === 'login' ? 'Log in to your Song Swap account' : 'Create your free Song Swap account'}
+        </p>
         {authMode === 'login'
           ? <LoginForm onLogin={loadMe} />
           : <RegisterForm onLogin={loadMe} />
@@ -529,6 +543,9 @@ function App() {
           )}
         </p>
         <button className="link-btn" id="back-to-home" onClick={() => setShowAuth(false)}>← Back to home</button>
+        <p id="auth-legal">
+          <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a>
+        </p>
       </div>
     </div>
   );
