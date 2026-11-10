@@ -435,7 +435,7 @@ function App() {
       openWithLinks(song.platformLinks, song);
       return;
     }
-    // Legacy song (no platformLinks) — resolve via odesli if user prefers non-Spotify
+    // Legacy song (no platformLinks) — re-resolve via /api/verify if user prefers non-Spotify
     if (preferredPlatform !== 'spotify' && song.spotifyUrl) {
       try {
         const res = await fetch('/api/verify', {
@@ -465,8 +465,15 @@ function App() {
         credentials: 'include',
         body: JSON.stringify({ link: songLink }),
       });
-      const data = await res.json();
-      if (!res.ok) { setVerifyError(data.error || 'Could not find that song'); return; }
+      // A proxy error page (Cloudflare/Railway) isn't JSON — don't mistake that for a network failure
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401) setVerifyError('Your session expired — log in again');
+        else if (data.error) setVerifyError(data.error);
+        else if (res.status >= 500) setVerifyError(`Server error (${res.status}) — try again in a moment`);
+        else setVerifyError('Could not find that song');
+        return;
+      }
       setSongDetails(data);
     } catch {
       setVerifyError('Network error — check your connection');

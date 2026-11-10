@@ -187,10 +187,12 @@ io.on('connection', (socket) => {
     const { rows: dup } = await pool.query(
       `SELECT * FROM song_history WHERE friendship_id = $1
        AND (
-         (odesli_page_url IS NOT NULL AND odesli_page_url = $2)
-         OR (odesli_page_url IS NULL AND spotify_uri IS NOT NULL AND spotify_uri = $3)
-       )`,
-      [friendshipId, song.odesliPageUrl ?? null, song.spotifyUri ?? null]
+         ($2::text IS NOT NULL AND odesli_page_url = $2)
+         OR ($3::text IS NOT NULL AND spotify_uri = $3)
+         OR (LOWER(title) = LOWER($4) AND LOWER(artist) = LOWER($5))
+       )
+       LIMIT 1`,
+      [friendshipId, song.odesliPageUrl ?? null, song.spotifyUri ?? null, song.title ?? '', song.artist ?? '']
     );
     if (dup.length > 0) {
       const d = dup[0];
@@ -495,10 +497,188 @@ if (fs.existsSync(DIST)) {
   app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
+// ── Song lookup ──────────────────────────────────────────────────────────────
+// Odesli/song.link retired its public API (2026-07-31), so we resolve links
+// ourselves: read the pasted link's own metadata, then search the other
+// platforms by title + artist. Amazon Music / Tidal have no free search API;
+// the frontend falls back to a search URL for those.
+
+const LOOKUP_TIMEOUT_MS = 8000;
+const fetchWithTimeout = (url, opts = {}) =>
+  fetch(url, { ...opts, signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) });
+
+const decodeHtml = (s) => s
+  .replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'")
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+const getMeta = (html, key) => {
+  const m = html.match(new RegExp(`<meta[^>]+(?:property|name)="${key}"[^>]+content="([^"]*)"`, 'i'));
+  return m ? decodeHtml(m[1]) : null;
+};
+
+const spotifyTrackLinks = (id) => ({
+  url: `https://open.spotify.com/track/${id}`,
+  nativeAppUriMobile: `spotify:track:${id}`,
+});
+
+// Optional: SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET enable Spotify API lookups
+// (more reliable metadata, and Spotify links for Apple Music / YouTube input).
+let spotifyToken = null;
+const getSpotifyToken = async () => {
+  const { SPOTIFY_CLIENT_ID: id, SPOTIFY_CLIENT_SECRET: secret } = process.env;
+  if (!id || !secret) return null;
+  if (spotifyToken && spotifyToken.expiresAt > Date.now() + 60_000) return spotifyToken.value;
+  try {
+    const res = await fetchWithTimeout('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    spotifyToken = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+    return spotifyToken.value;
+  } catch { return null; }
+};
+
+// Returns { platform, id, ... }, { unsupported: true } for a non-track link
+// on a known service, or null for an unrecognized link.
+const parseLink = (raw) => {
+  const text = raw.trim();
+  const uri = text.match(/^spotify:track:([A-Za-z0-9]{22})$/);
+  if (uri) return { platform: 'spotify', id: uri[1] };
+
+  let u;
+  try { u = new URL(text); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, '');
+
+  if (host === 'open.spotify.com') {
+    const m = u.pathname.match(/\/track\/([A-Za-z0-9]{22})/);
+    return m ? { platform: 'spotify', id: m[1] } : { unsupported: true };
+  }
+  if (host === 'spotify.link' || host === 'spotify.app.link') {
+    return { platform: 'spotify', shortUrl: u.href };
+  }
+  if (host === 'music.apple.com' || host === 'itunes.apple.com') {
+    const id = u.searchParams.get('i') ?? u.pathname.match(/\/song\/(?:[^/]+\/)?(\d+)/)?.[1];
+    const country = u.pathname.match(/^\/([a-z]{2})\//)?.[1] ?? 'us';
+    return id && /^\d+$/.test(id) ? { platform: 'appleMusic', id, country } : { unsupported: true };
+  }
+  if (['youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)) {
+    const v = u.searchParams.get('v');
+    return v && /^[\w-]{11}$/.test(v) ? { platform: 'youtube', id: v } : { unsupported: true };
+  }
+  if (host === 'youtu.be') {
+    const v = u.pathname.slice(1).split('/')[0];
+    return /^[\w-]{11}$/.test(v) ? { platform: 'youtube', id: v } : { unsupported: true };
+  }
+  return null;
+};
+
+// spotify.link short links redirect (sometimes via an HTML page) to open.spotify.com
+const resolveSpotifyShortLink = async (shortUrl) => {
+  const res = await fetchWithTimeout(shortUrl, { headers: { 'User-Agent': 'song-swap/1.0' } });
+  const fromUrl = res.url.match(/open\.spotify\.com\/(?:[\w-]+\/)?track\/([A-Za-z0-9]{22})/);
+  if (fromUrl) return fromUrl[1];
+  const fromBody = (await res.text()).match(/open\.spotify\.com\/(?:[\w-]+\/)?track\/([A-Za-z0-9]{22})/);
+  return fromBody?.[1] ?? null;
+};
+
+const lookupSpotify = async (id) => {
+  const token = await getSpotifyToken();
+  if (token) {
+    try {
+      const res = await fetchWithTimeout(`https://api.spotify.com/v1/tracks/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const t = await res.json();
+        return {
+          title: t.name,
+          artist: t.artists.map(a => a.name).join(', '),
+          album: t.album?.name ?? null,
+          albumArt: t.album?.images?.[0]?.url ?? null,
+        };
+      }
+    } catch { /* fall through to page scrape */ }
+  }
+  // No API credentials (or API failed): read the public track page's meta tags.
+  // A non-browser User-Agent gets the server-rendered page with og: tags.
+  const res = await fetchWithTimeout(`https://open.spotify.com/track/${id}`, {
+    headers: { 'User-Agent': 'song-swap/1.0' },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Spotify page returned ${res.status}`);
+  const html = await res.text();
+  const title = getMeta(html, 'og:title');
+  const parts = getMeta(html, 'og:description')?.split(' · ') ?? []; // "Artist · Album · Song · 1987"
+  const artist = parts[0] || getMeta(html, 'music:musician_description');
+  if (!title || !artist) return null;
+  return {
+    title,
+    artist,
+    album: parts.length >= 3 ? parts[1] : null,
+    albumArt: getMeta(html, 'og:image'),
+  };
+};
+
+const lookupApple = async (id, country) => {
+  const res = await fetchWithTimeout(`https://itunes.apple.com/lookup?id=${id}&country=${country}&entity=song`);
+  if (!res.ok) throw new Error(`iTunes lookup returned ${res.status}`);
+  const t = (await res.json()).results?.find(r => r.kind === 'song');
+  if (!t) return null;
+  return {
+    title: t.trackName,
+    artist: t.artistName,
+    album: t.collectionName ?? null,
+    albumArt: t.artworkUrl100?.replace('100x100bb', '600x600bb') ?? null,
+    url: t.trackViewUrl,
+  };
+};
+
+const lookupYouTube = async (videoId) => {
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const res = await fetchWithTimeout(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(watchUrl)}`);
+  if ([400, 401, 403, 404].includes(res.status)) return null;
+  if (!res.ok) throw new Error(`YouTube oEmbed returned ${res.status}`);
+  const d = await res.json();
+  let title = d.title;
+  let artist = d.author_name ?? '';
+  if (/ - Topic$/.test(artist)) {
+    // Auto-generated YouTube Music channels: "Artist - Topic", title is the song
+    artist = artist.replace(/ - Topic$/, '');
+  } else {
+    // Regular uploads usually look like "Artist - Song (Official Video)"
+    const m = title.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+    if (m) { artist = m[1]; title = m[2]; }
+  }
+  title = title
+    .replace(/\s*[([][^)\]]*\b(official|lyrics?|audio|video|visuali[sz]er|hd|4k|mv)\b[^)\]]*[)\]]/gi, '')
+    .trim();
+  if (!title || !artist) return null;
+  return { title, artist, album: null, albumArt: d.thumbnail_url ?? null };
+};
+
+const searchSpotify = async (title, artist) => {
+  const token = await getSpotifyToken();
+  if (!token) return null;
+  try {
+    const q = encodeURIComponent(`track:${title} artist:${artist}`);
+    const res = await fetchWithTimeout(`https://api.spotify.com/v1/search?q=${q}&type=track&limit=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()).tracks?.items?.[0]?.id ?? null;
+  } catch { return null; }
+};
+
 const searchItunes = async (title, artist) => {
   try {
     const q = encodeURIComponent(`${title} ${artist}`);
-    const res = await fetch(`https://itunes.apple.com/search?term=${q}&entity=song&limit=1`);
+    const res = await fetchWithTimeout(`https://itunes.apple.com/search?term=${q}&entity=song&limit=1`);
     const data = await res.json();
     const url = data.results?.[0]?.trackViewUrl;
     return url ? { url } : null;
@@ -509,7 +689,7 @@ const searchYouTubeMusic = async (title, artist) => {
   if (!process.env.YOUTUBE_API_KEY) return null;
   try {
     const q = encodeURIComponent(`${title} ${artist}`);
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${q}&type=video&videoCategoryId=10&maxResults=1&key=${process.env.YOUTUBE_API_KEY}`
     );
     const data = await res.json();
@@ -520,50 +700,62 @@ const searchYouTubeMusic = async (title, artist) => {
 
 app.post('/api/verify', requireAuth, async (req, res) => {
   const { link } = req.body;
-  if (!link) return res.status(400).json({ error: 'Link required' });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  if (!link || typeof link !== 'string') return res.status(400).json({ error: 'Link required' });
+
+  let parsed = parseLink(link);
+  if (!parsed) return res.status(400).json({ error: 'Paste a Spotify, Apple Music, or YouTube song link' });
+  if (parsed.unsupported) return res.status(400).json({ error: "That link isn't a single song — paste a link to a track" });
+
   try {
-    const headers = {};
-    if (process.env.ODESLI_API_KEY) headers['x-api-key'] = process.env.ODESLI_API_KEY;
-    const oRes = await fetch(
-      `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}&userCountry=US`,
-      { signal: controller.signal, headers }
-    );
-    clearTimeout(timeout);
-    if (oRes.status === 404) return res.status(404).json({ error: 'Song not found on any platform' });
-    if (oRes.status === 429) return res.status(429).json({ error: 'Rate limited — try again in a moment' });
-    if (!oRes.ok) return res.status(502).json({ error: 'Music lookup service unavailable' });
-    const data = await oRes.json();
-    const entity = data.entitiesByUniqueId?.[data.entityUniqueId];
-    if (!entity) return res.status(404).json({ error: 'Song not found' });
+    if (parsed.shortUrl) {
+      const id = await resolveSpotifyShortLink(parsed.shortUrl);
+      if (!id) return res.status(404).json({ error: 'Could not open that Spotify link' });
+      parsed = { platform: 'spotify', id };
+    }
 
-    const platformLinks = { ...(data.linksByPlatform ?? {}) };
+    const platformLinks = {};
+    let song;
+    if (parsed.platform === 'spotify') {
+      song = await lookupSpotify(parsed.id);
+      platformLinks.spotify = spotifyTrackLinks(parsed.id);
+    } else if (parsed.platform === 'appleMusic') {
+      song = await lookupApple(parsed.id, parsed.country);
+      if (song) platformLinks.appleMusic = { url: song.url };
+    } else {
+      song = await lookupYouTube(parsed.id);
+      platformLinks.youtubeMusic = { url: `https://music.youtube.com/watch?v=${parsed.id}` };
+    }
+    if (!song) return res.status(404).json({ error: 'Song not found' });
 
-    // Fill in Apple Music and YouTube Music if song.link didn't return them
-    const [itunesResult, ytResult] = await Promise.all([
-      platformLinks.appleMusic ? null : searchItunes(entity.title, entity.artistName),
-      platformLinks.youtubeMusic ? null : searchYouTubeMusic(entity.title, entity.artistName),
+    const [spotifyId, itunesResult, ytResult] = await Promise.all([
+      platformLinks.spotify ? null : searchSpotify(song.title, song.artist),
+      platformLinks.appleMusic ? null : searchItunes(song.title, song.artist),
+      platformLinks.youtubeMusic ? null : searchYouTubeMusic(song.title, song.artist),
     ]);
+    if (spotifyId) platformLinks.spotify = spotifyTrackLinks(spotifyId);
     if (itunesResult) platformLinks.appleMusic = itunesResult;
     if (ytResult) platformLinks.youtubeMusic = ytResult;
 
-    const spotifyLinks = platformLinks.spotify ?? null;
+    const sid = parsed.platform === 'spotify' ? parsed.id : spotifyId;
     res.json({
-      title: entity.title,
-      artist: entity.artistName,
-      album: entity.albumName ?? null,
-      albumArt: entity.thumbnailUrl ?? null,
-      spotifyUri: spotifyLinks?.nativeAppUriMobile ?? null,
-      spotifyUrl: spotifyLinks?.url ?? null,
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      albumArt: song.albumArt,
+      spotifyUri: platformLinks.spotify?.nativeAppUriMobile ?? null,
+      spotifyUrl: platformLinks.spotify?.url ?? null,
       platformLinks,
       sourceUrl: link,
-      odesliPageUrl: data.pageUrl ?? null,
+      // song.link's web pages still work; this URL format matches what Odesli
+      // returned for Spotify input, so duplicate checks line up with old history.
+      odesliPageUrl: sid ? `https://song.link/s/${sid}` : null,
     });
   } catch (err) {
-    clearTimeout(timeout);
-    if (err.name === 'AbortError') return res.status(504).json({ error: 'Music lookup timed out' });
-    res.status(502).json({ error: 'Music lookup service unavailable' });
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return res.status(504).json({ error: 'Music lookup timed out — try again' });
+    }
+    console.error('Song lookup failed:', err);
+    res.status(502).json({ error: 'Music lookup failed — try again in a moment' });
   }
 });
 
