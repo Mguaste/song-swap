@@ -73,6 +73,7 @@ function RegisterForm({ onLogin }) {
         <option value="youtubeMusic">YouTube Music</option>
         <option value="amazonMusic">Amazon Music</option>
         <option value="tidal">Tidal</option>
+        <option value="deezer">Deezer</option>
       </select>
       {error && <p id="login-error">{error}</p>}
       <button type="submit">Sign Up</button>
@@ -90,7 +91,7 @@ const FEATURES = [
   },
   {
     title: 'Any platform',
-    body: 'Spotify, Apple Music, YouTube Music, Amazon Music, Tidal — paste any link and it opens in the app you prefer.',
+    body: 'Spotify, Apple Music, YouTube Music, Deezer, Tidal, Amazon Music — paste a link and it opens in the app you prefer.',
     icon: (
       <>
         <circle cx="12" cy="12" r="9" />
@@ -221,7 +222,7 @@ function LandingPage({ onLogin, onSignup }) {
         </div>
         <p className="landing-disclaimer">
           Song Swap is an independent project and is not affiliated with, endorsed by, or connected to
-          Spotify, Apple, Google, Amazon, or Tidal. Platform names are used only to describe which
+          Spotify, Apple, Google, Amazon, Tidal, or Deezer. Platform names are used only to describe which
           services' song links the app can open. We never ask for your credentials to any other service.
         </p>
       </footer>
@@ -391,7 +392,7 @@ function App() {
     }
   };
 
-  const PLATFORM_PRIORITY = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
+  const PLATFORM_PRIORITY = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal', 'deezer'];
 
   const buildSearchUrl = (platform, title, artist) => {
     const q = encodeURIComponent(`${title} ${artist}`);
@@ -400,6 +401,7 @@ function App() {
       case 'appleMusic':    return `https://music.apple.com/search?term=${q}`;
       case 'youtubeMusic':  return `https://music.youtube.com/search?q=${q}`;
       case 'tidal':         return `https://listen.tidal.com/search?q=${q}`;
+      case 'deezer':        return `https://www.deezer.com/search/${q}`;
       case 'amazonMusic':   return `https://music.amazon.com/search/${q}`;
       default:              return null;
     }
@@ -728,6 +730,7 @@ function App() {
                     <option value="youtubeMusic">YouTube Music</option>
                     <option value="amazonMusic">Amazon Music</option>
                     <option value="tidal">Tidal</option>
+                    <option value="deezer">Deezer</option>
                   </select>
                 </div>
               </div>

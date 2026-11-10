@@ -1094,6 +1094,20 @@ img.album-art {
 .platform-select:focus { border-color: #10B981; }
 .platform-select option { background: #1a1a1a; }
 
+/* appearance: none hides the native arrow, so draw our own chevron */
+.register-platform-select,
+.platform-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  padding-right: 34px;
+}
+.register-platform-select:hover,
+.platform-select:hover { border-color: #4a4a4a; }
+.register-platform-select:focus,
+.platform-select:focus { border-color: #10B981; }
+
 /* ── Settings Page ── */
 
 #settings-btn {

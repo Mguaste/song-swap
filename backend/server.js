@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
@@ -162,10 +163,13 @@ app.use((req, res, next) => {
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(bodyParser.json());
 app.use(session({
+  // Sessions live in Postgres so deploys/restarts don't log everyone out
+  store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     httpOnly: true,
@@ -260,7 +264,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
   if (trimmed.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
-  const VALID_PLATFORMS = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
+  const VALID_PLATFORMS = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal', 'deezer'];
   const platform = VALID_PLATFORMS.includes(preferredPlatform) ? preferredPlatform : 'spotify';
 
   const { rows: existing } = await pool.query('SELECT id FROM users WHERE LOWER(name) = LOWER($1)', [trimmed]);
@@ -301,7 +305,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
 });
 
 app.patch('/api/me/preferred-platform', requireAuth, async (req, res) => {
-  const VALID = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal'];
+  const VALID = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal', 'deezer'];
   const { platform } = req.body;
   if (!VALID.includes(platform)) return res.status(400).json({ error: 'Invalid platform' });
   await pool.query('UPDATE users SET preferred_platform = $1 WHERE name = $2', [platform, req.session.user.name]);
@@ -499,13 +503,25 @@ if (fs.existsSync(DIST)) {
 
 // ── Song lookup ──────────────────────────────────────────────────────────────
 // Odesli/song.link retired its public API (2026-07-31), so we resolve links
-// ourselves: read the pasted link's own metadata, then search the other
-// platforms by title + artist. Amazon Music / Tidal have no free search API;
-// the frontend falls back to a search URL for those.
+// ourselves:
+//   1. Read the pasted link's own metadata (title, artist, art, and ISRC
+//      when the source provides one).
+//   2. Match on the other platforms — by ISRC when we have it (exact
+//      recording), otherwise by a strict title + artist comparison.
+// Optional credentials (each unlocks more exact matches; all degrade gracefully):
+//   SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET — Spotify API: ISRCs + Spotify links
+//   TIDAL_CLIENT_ID / TIDAL_CLIENT_SECRET     — Tidal links (by ISRC) + Tidal input
+//   YOUTUBE_API_KEY                           — YouTube Music links
+// Amazon Music has no public API; the frontend falls back to a search URL.
 
 const LOOKUP_TIMEOUT_MS = 8000;
+const UA = { 'User-Agent': 'song-swap/1.0' };
 const fetchWithTimeout = (url, opts = {}) =>
   fetch(url, { ...opts, signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) });
+const fetchJson = async (url, opts) => {
+  const res = await fetchWithTimeout(url, opts);
+  return res.ok ? res.json() : null;
+};
 
 const decodeHtml = (s) => s
   .replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'")
@@ -516,20 +532,46 @@ const getMeta = (html, key) => {
   return m ? decodeHtml(m[1]) : null;
 };
 
-const spotifyTrackLinks = (id) => ({
-  url: `https://open.spotify.com/track/${id}`,
-  nativeAppUriMobile: `spotify:track:${id}`,
-});
+// ── Title/artist matching ────────────────────────────────────────────────────
+// Search results are fuzzy (searching a song often returns its remixes first),
+// so a candidate must have the same title and share the lead artist.
+const fold = (s) => (s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const norm = (s) => fold(s).replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+const coreTitle = (s) => norm(fold(s)
+  .replace(/\s*[([][^)\]]*[)\]]/g, '')     // (feat. X), [Remastered], (Cake Mix)
+  .replace(/\s+[-–—]\s+.*$/, '')           // " - Remastered 2009", " - Live"
+  .replace(/\s+(feat|ft)\.?\s.*$/, ''));
+// Words that mark a different recording of the same song
+const ALT_VERSION = /\b(remix|mix|live|acoustic|instrumental|karaoke|cover|sped up|slowed|reverb|demo|piano|pianoforte|orchestral|a cappella|8 bit|tribute)\b/;
+const leadArtist = (s) => norm(fold(s).split(/,|&|\s+(?:feat\.?|ft\.?|x|with|and)\s+/)[0]);
 
-// Optional: SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET enable Spotify API lookups
-// (more reliable metadata, and Spotify links for Apple Music / YouTube input).
-let spotifyToken = null;
-const getSpotifyToken = async () => {
-  const { SPOTIFY_CLIENT_ID: id, SPOTIFY_CLIENT_SECRET: secret } = process.env;
+const matchScore = (src, title, artist) => {
+  const a = leadArtist(src.artist), b = norm(artist);
+  if (!a || !b || !(b.includes(a) || a.includes(leadArtist(artist)))) return 0;
+  if (norm(title) === norm(src.title)) return 2;
+  if (coreTitle(title) !== coreTitle(src.title)) return 0;
+  const isAlt = (t) => ALT_VERSION.test(norm(t));
+  return isAlt(title) && !isAlt(src.title) ? 0 : 1;
+};
+
+// Best-scoring candidate (ties keep the service's own ranking), or null
+const pickBest = (src, items, getTitle, getArtist) => {
+  let best = null, bestScore = 0;
+  for (const item of items ?? []) {
+    const s = matchScore(src, getTitle(item), getArtist(item));
+    if (s > bestScore) { best = item; bestScore = s; }
+  }
+  return best;
+};
+
+// ── Client-credentials tokens (Spotify, Tidal) ───────────────────────────────
+const tokenCache = {};
+const getClientToken = async (name, tokenUrl, id, secret) => {
   if (!id || !secret) return null;
-  if (spotifyToken && spotifyToken.expiresAt > Date.now() + 60_000) return spotifyToken.value;
+  const cached = tokenCache[name];
+  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.value;
   try {
-    const res = await fetchWithTimeout('https://accounts.spotify.com/api/token', {
+    const data = await fetchJson(tokenUrl, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,
@@ -537,15 +579,28 @@ const getSpotifyToken = async () => {
       },
       body: 'grant_type=client_credentials',
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    spotifyToken = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-    return spotifyToken.value;
+    if (!data?.access_token) return null;
+    tokenCache[name] = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+    return data.access_token;
   } catch { return null; }
 };
+const getSpotifyToken = () => getClientToken('spotify', 'https://accounts.spotify.com/api/token',
+  process.env.SPOTIFY_CLIENT_ID, process.env.SPOTIFY_CLIENT_SECRET);
+const getTidalToken = () => getClientToken('tidal', 'https://auth.tidal.com/v1/oauth2/token',
+  process.env.TIDAL_CLIENT_ID, process.env.TIDAL_CLIENT_SECRET);
 
-// Returns { platform, id, ... }, { unsupported: true } for a non-track link
-// on a known service, or null for an unrecognized link.
+const spotifyTrackLinks = (id) => ({
+  url: `https://open.spotify.com/track/${id}`,
+  nativeAppUriMobile: `spotify:track:${id}`,
+});
+
+// ── Parsing pasted links ─────────────────────────────────────────────────────
+// Returns { platform, id, ... }, { error } for a link we can't use, or null
+// for an unrecognized link.
+const SPOTIFY_TRACK_RE = /open\.spotify\.com\/(?:[\w-]+\/)?track\/([A-Za-z0-9]{22})/;
+const DEEZER_TRACK_RE = /deezer\.com\/(?:[a-z]{2}\/)?track\/(\d+)/;
+const NOT_A_TRACK = { error: "That link isn't a single song — paste a link to a track" };
+
 const parseLink = (raw) => {
   const text = raw.trim();
   const uri = text.match(/^spotify:track:([A-Za-z0-9]{22})$/);
@@ -556,60 +611,72 @@ const parseLink = (raw) => {
   const host = u.hostname.replace(/^www\./, '');
 
   if (host === 'open.spotify.com') {
-    const m = u.pathname.match(/\/track\/([A-Za-z0-9]{22})/);
-    return m ? { platform: 'spotify', id: m[1] } : { unsupported: true };
+    const m = u.href.match(SPOTIFY_TRACK_RE);
+    return m ? { platform: 'spotify', id: m[1] } : NOT_A_TRACK;
   }
   if (host === 'spotify.link' || host === 'spotify.app.link') {
-    return { platform: 'spotify', shortUrl: u.href };
+    return { platform: 'spotify', shortUrl: u.href, pattern: SPOTIFY_TRACK_RE };
   }
   if (host === 'music.apple.com' || host === 'itunes.apple.com') {
     const id = u.searchParams.get('i') ?? u.pathname.match(/\/song\/(?:[^/]+\/)?(\d+)/)?.[1];
     const country = u.pathname.match(/^\/([a-z]{2})\//)?.[1] ?? 'us';
-    return id && /^\d+$/.test(id) ? { platform: 'appleMusic', id, country } : { unsupported: true };
+    return id && /^\d+$/.test(id) ? { platform: 'appleMusic', id, country } : NOT_A_TRACK;
   }
   if (['youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)) {
     const v = u.searchParams.get('v');
-    return v && /^[\w-]{11}$/.test(v) ? { platform: 'youtube', id: v } : { unsupported: true };
+    return v && /^[\w-]{11}$/.test(v) ? { platform: 'youtube', id: v } : NOT_A_TRACK;
   }
   if (host === 'youtu.be') {
     const v = u.pathname.slice(1).split('/')[0];
-    return /^[\w-]{11}$/.test(v) ? { platform: 'youtube', id: v } : { unsupported: true };
+    return /^[\w-]{11}$/.test(v) ? { platform: 'youtube', id: v } : NOT_A_TRACK;
+  }
+  if (host === 'deezer.com') {
+    const m = u.href.match(DEEZER_TRACK_RE);
+    return m ? { platform: 'deezer', id: m[1] } : NOT_A_TRACK;
+  }
+  if (host === 'link.deezer.com' || host === 'deezer.page.link') {
+    return { platform: 'deezer', shortUrl: u.href, pattern: DEEZER_TRACK_RE };
+  }
+  if (host === 'tidal.com' || host === 'listen.tidal.com') {
+    const m = u.pathname.match(/\/track\/(\d+)/);
+    return m ? { platform: 'tidal', id: m[1] } : NOT_A_TRACK;
+  }
+  if (host.endsWith('music.amazon.com') || host === 'amazon.com') {
+    return { error: "Amazon Music links can't be read yet — paste the song from another app" };
   }
   return null;
 };
 
-// spotify.link short links redirect (sometimes via an HTML page) to open.spotify.com
-const resolveSpotifyShortLink = async (shortUrl) => {
-  const res = await fetchWithTimeout(shortUrl, { headers: { 'User-Agent': 'song-swap/1.0' } });
-  const fromUrl = res.url.match(/open\.spotify\.com\/(?:[\w-]+\/)?track\/([A-Za-z0-9]{22})/);
-  if (fromUrl) return fromUrl[1];
-  const fromBody = (await res.text()).match(/open\.spotify\.com\/(?:[\w-]+\/)?track\/([A-Za-z0-9]{22})/);
-  return fromBody?.[1] ?? null;
+// Short links redirect (sometimes via an HTML page) to the full track URL
+const resolveShortLink = async (shortUrl, pattern) => {
+  const res = await fetchWithTimeout(shortUrl, { headers: UA });
+  return res.url.match(pattern)?.[1] ?? (await res.text()).match(pattern)?.[1] ?? null;
 };
+
+// ── Reading the pasted song ──────────────────────────────────────────────────
+// Each returns { title, artist, album, albumArt, isrc?, url? } or null if not found.
 
 const lookupSpotify = async (id) => {
   const token = await getSpotifyToken();
   if (token) {
     try {
-      const res = await fetchWithTimeout(`https://api.spotify.com/v1/tracks/${id}`, {
+      const t = await fetchJson(`https://api.spotify.com/v1/tracks/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const t = await res.json();
+      if (t?.name) {
         return {
           title: t.name,
           artist: t.artists.map(a => a.name).join(', '),
           album: t.album?.name ?? null,
           albumArt: t.album?.images?.[0]?.url ?? null,
+          isrc: t.external_ids?.isrc ?? null,
         };
       }
     } catch { /* fall through to page scrape */ }
   }
-  // No API credentials (or API failed): read the public track page's meta tags.
+  // No API access: read the public track page's meta tags (no ISRC there).
   // A non-browser User-Agent gets the server-rendered page with og: tags.
-  const res = await fetchWithTimeout(`https://open.spotify.com/track/${id}`, {
-    headers: { 'User-Agent': 'song-swap/1.0' },
-  });
+  const res = await fetchWithTimeout(`https://open.spotify.com/track/${id}`, { headers: UA });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Spotify page returned ${res.status}`);
   const html = await res.text();
@@ -617,12 +684,7 @@ const lookupSpotify = async (id) => {
   const parts = getMeta(html, 'og:description')?.split(' · ') ?? []; // "Artist · Album · Song · 1987"
   const artist = parts[0] || getMeta(html, 'music:musician_description');
   if (!title || !artist) return null;
-  return {
-    title,
-    artist,
-    album: parts.length >= 3 ? parts[1] : null,
-    albumArt: getMeta(html, 'og:image'),
-  };
+  return { title, artist, album: parts.length >= 3 ? parts[1] : null, albumArt: getMeta(html, 'og:image') };
 };
 
 const lookupApple = async (id, country) => {
@@ -662,38 +724,118 @@ const lookupYouTube = async (videoId) => {
   return { title, artist, album: null, albumArt: d.thumbnail_url ?? null };
 };
 
-const searchSpotify = async (title, artist) => {
+const deezerTrackToSong = (t) => ({
+  title: t.title,
+  artist: t.contributors?.length ? t.contributors.map(c => c.name).join(', ') : t.artist?.name,
+  album: t.album?.title ?? null,
+  albumArt: t.album?.cover_xl ?? t.album?.cover_big ?? null,
+  isrc: t.isrc ?? null,
+  url: t.link ?? `https://www.deezer.com/track/${t.id}`,
+});
+
+const lookupDeezer = async (id) => {
+  const res = await fetchWithTimeout(`https://api.deezer.com/track/${id}`);
+  if (!res.ok) throw new Error(`Deezer returned ${res.status}`);
+  const t = await res.json();
+  return t.error || !t.title ? null : deezerTrackToSong(t);
+};
+
+const TIDAL_API = 'https://openapi.tidal.com/v2';
+const tidalHeaders = (token) => ({ Authorization: `Bearer ${token}`, Accept: 'application/vnd.api+json' });
+
+const lookupTidal = async (id) => {
+  const token = await getTidalToken();
+  if (!token) return { unavailable: true };
+  const res = await fetchWithTimeout(`${TIDAL_API}/tracks/${id}?countryCode=US&include=artists,albums`, {
+    headers: tidalHeaders(token),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Tidal returned ${res.status}`);
+  const d = await res.json();
+  const a = d.data?.attributes;
+  if (!a?.title) return null;
+  const included = d.included ?? [];
+  const find = (type, ref) => included.find(i => i.type === type && i.id === ref.id);
+  const artists = (d.data.relationships?.artists?.data ?? [])
+    .map(ref => find('artists', ref)?.attributes?.name).filter(Boolean);
+  const albumRef = d.data.relationships?.albums?.data?.[0];
+  const album = albumRef ? find('albums', albumRef) : null;
+  if (!artists.length) return null;
+  return {
+    title: a.version ? `${a.title} (${a.version})` : a.title,
+    artist: artists.join(', '),
+    album: album?.attributes?.title ?? null,
+    albumArt: album?.attributes?.imageLinks?.[0]?.href ?? null,
+    isrc: a.isrc ?? null,
+    url: `https://tidal.com/browse/track/${id}`,
+  };
+};
+
+// ── Finding the song on other platforms ──────────────────────────────────────
+// Each returns a link object or null, and never throws (a failed platform just
+// means no direct link; the frontend falls back to a search URL).
+
+const searchSpotify = async (song) => {
   const token = await getSpotifyToken();
   if (!token) return null;
+  const headers = { Authorization: `Bearer ${token}` };
+  const search = (q, limit) => fetchJson(
+    `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}`, { headers });
   try {
-    const q = encodeURIComponent(`track:${title} artist:${artist}`);
-    const res = await fetchWithTimeout(`https://api.spotify.com/v1/search?q=${q}&type=track&limit=1`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return null;
-    return (await res.json()).tracks?.items?.[0]?.id ?? null;
+    if (song.isrc) {
+      const hit = (await search(`isrc:${song.isrc}`, 1))?.tracks?.items?.[0];
+      if (hit) return { id: hit.id, isrc: song.isrc };
+    }
+    const items = (await search(`track:${coreTitle(song.title)} artist:${leadArtist(song.artist)}`, 10))?.tracks?.items;
+    const hit = pickBest(song, items, t => t.name, t => t.artists.map(a => a.name).join(', '));
+    return hit ? { id: hit.id, isrc: hit.external_ids?.isrc ?? null } : null;
   } catch { return null; }
 };
 
-const searchItunes = async (title, artist) => {
+const searchItunes = async (song) => {
   try {
-    const q = encodeURIComponent(`${title} ${artist}`);
-    const res = await fetchWithTimeout(`https://itunes.apple.com/search?term=${q}&entity=song&limit=1`);
-    const data = await res.json();
-    const url = data.results?.[0]?.trackViewUrl;
-    return url ? { url } : null;
+    const q = encodeURIComponent(`${coreTitle(song.title)} ${leadArtist(song.artist)}`);
+    const data = await fetchJson(`https://itunes.apple.com/search?term=${q}&entity=song&limit=15&country=us`);
+    const hit = pickBest(song, data?.results, r => r.trackName, r => r.artistName);
+    return hit?.trackViewUrl ? { url: hit.trackViewUrl } : null;
   } catch { return null; }
 };
 
-const searchYouTubeMusic = async (title, artist) => {
+const searchDeezer = async (song) => {
+  try {
+    if (song.isrc) {
+      const t = await fetchJson(`https://api.deezer.com/track/isrc:${encodeURIComponent(song.isrc)}`);
+      if (t?.link && !t.error) return { url: t.link };
+    }
+    const q = encodeURIComponent(`${coreTitle(song.title)} ${leadArtist(song.artist)}`);
+    const data = await fetchJson(`https://api.deezer.com/search?q=${q}&limit=15`);
+    const hit = pickBest(song, data?.data, t => t.title, t => t.artist?.name);
+    return hit?.link ? { url: hit.link } : null;
+  } catch { return null; }
+};
+
+// Tidal's catalogue search isn't reliable enough to match by name, so ISRC only
+const searchTidal = async (song) => {
+  if (!song.isrc) return null;
+  const token = await getTidalToken();
+  if (!token) return null;
+  try {
+    const data = await fetchJson(
+      `${TIDAL_API}/tracks?countryCode=US&filter%5Bisrc%5D=${encodeURIComponent(song.isrc)}`,
+      { headers: tidalHeaders(token) });
+    const id = data?.data?.[0]?.id;
+    return id ? { url: `https://tidal.com/browse/track/${id}` } : null;
+  } catch { return null; }
+};
+
+const searchYouTubeMusic = async (song) => {
   if (!process.env.YOUTUBE_API_KEY) return null;
   try {
-    const q = encodeURIComponent(`${title} ${artist}`);
-    const res = await fetchWithTimeout(
+    const q = encodeURIComponent(`${song.title} ${song.artist}`);
+    const data = await fetchJson(
       `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${q}&type=video&videoCategoryId=10&maxResults=1&key=${process.env.YOUTUBE_API_KEY}`
     );
-    const data = await res.json();
-    const videoId = data.items?.[0]?.id?.videoId;
+    const videoId = data?.items?.[0]?.id?.videoId;
     return videoId ? { url: `https://music.youtube.com/watch?v=${videoId}` } : null;
   } catch { return null; }
 };
@@ -703,40 +845,61 @@ app.post('/api/verify', requireAuth, async (req, res) => {
   if (!link || typeof link !== 'string') return res.status(400).json({ error: 'Link required' });
 
   let parsed = parseLink(link);
-  if (!parsed) return res.status(400).json({ error: 'Paste a Spotify, Apple Music, or YouTube song link' });
-  if (parsed.unsupported) return res.status(400).json({ error: "That link isn't a single song — paste a link to a track" });
+  if (!parsed) return res.status(400).json({ error: 'Paste a Spotify, Apple Music, YouTube, Deezer, or Tidal song link' });
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
 
   try {
     if (parsed.shortUrl) {
-      const id = await resolveSpotifyShortLink(parsed.shortUrl);
-      if (!id) return res.status(404).json({ error: 'Could not open that Spotify link' });
-      parsed = { platform: 'spotify', id };
+      const id = await resolveShortLink(parsed.shortUrl, parsed.pattern);
+      if (!id) return res.status(404).json({ error: 'Could not open that link — paste the full song link' });
+      parsed = { platform: parsed.platform, id };
     }
 
+    // 1. Read the pasted song
     const platformLinks = {};
     let song;
-    if (parsed.platform === 'spotify') {
-      song = await lookupSpotify(parsed.id);
-      platformLinks.spotify = spotifyTrackLinks(parsed.id);
-    } else if (parsed.platform === 'appleMusic') {
-      song = await lookupApple(parsed.id, parsed.country);
-      if (song) platformLinks.appleMusic = { url: song.url };
-    } else {
-      song = await lookupYouTube(parsed.id);
-      platformLinks.youtubeMusic = { url: `https://music.youtube.com/watch?v=${parsed.id}` };
+    switch (parsed.platform) {
+      case 'spotify':
+        song = await lookupSpotify(parsed.id);
+        platformLinks.spotify = spotifyTrackLinks(parsed.id);
+        break;
+      case 'appleMusic':
+        song = await lookupApple(parsed.id, parsed.country);
+        if (song) platformLinks.appleMusic = { url: song.url };
+        break;
+      case 'youtube':
+        song = await lookupYouTube(parsed.id);
+        platformLinks.youtubeMusic = { url: `https://music.youtube.com/watch?v=${parsed.id}` };
+        break;
+      case 'deezer':
+        song = await lookupDeezer(parsed.id);
+        if (song) platformLinks.deezer = { url: song.url };
+        break;
+      case 'tidal':
+        song = await lookupTidal(parsed.id);
+        if (song?.unavailable) return res.status(400).json({ error: "Tidal links can't be read yet — paste the song from another app" });
+        if (song) platformLinks.tidal = { url: song.url };
+        break;
     }
     if (!song) return res.status(404).json({ error: 'Song not found' });
 
-    const [spotifyId, itunesResult, ytResult] = await Promise.all([
-      platformLinks.spotify ? null : searchSpotify(song.title, song.artist),
-      platformLinks.appleMusic ? null : searchItunes(song.title, song.artist),
-      platformLinks.youtubeMusic ? null : searchYouTubeMusic(song.title, song.artist),
-    ]);
-    if (spotifyId) platformLinks.spotify = spotifyTrackLinks(spotifyId);
-    if (itunesResult) platformLinks.appleMusic = itunesResult;
-    if (ytResult) platformLinks.youtubeMusic = ytResult;
+    // 2. Spotify first: its API can supply the ISRC that makes the rest exact
+    let spotifyId = parsed.platform === 'spotify' ? parsed.id : null;
+    if (!platformLinks.spotify) {
+      const sp = await searchSpotify(song);
+      if (sp) {
+        spotifyId = sp.id;
+        platformLinks.spotify = spotifyTrackLinks(sp.id);
+        song.isrc ??= sp.isrc;
+      }
+    }
 
-    const sid = parsed.platform === 'spotify' ? parsed.id : spotifyId;
+    // 3. Everything else in parallel
+    const others = { appleMusic: searchItunes, deezer: searchDeezer, tidal: searchTidal, youtubeMusic: searchYouTubeMusic };
+    const missing = Object.keys(others).filter(p => !platformLinks[p]);
+    const results = await Promise.all(missing.map(p => others[p](song)));
+    missing.forEach((p, i) => { if (results[i]) platformLinks[p] = results[i]; });
+
     res.json({
       title: song.title,
       artist: song.artist,
@@ -748,7 +911,7 @@ app.post('/api/verify', requireAuth, async (req, res) => {
       sourceUrl: link,
       // song.link's web pages still work; this URL format matches what Odesli
       // returned for Spotify input, so duplicate checks line up with old history.
-      odesliPageUrl: sid ? `https://song.link/s/${sid}` : null,
+      odesliPageUrl: spotifyId ? `https://song.link/s/${spotifyId}` : null,
     });
   } catch (err) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
