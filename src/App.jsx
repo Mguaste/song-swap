@@ -298,14 +298,37 @@ function App() {
     if (r.ok) setFriendRequests(await r.json());
   };
 
+  // Record that this friendship's swap has been seen. Uses the newest known
+  // song time when it's ahead of this device's clock, so clock skew can't make
+  // an already-seen song count as unread again on the next load.
+  const markRead = (friendshipId, latestSentAt) => {
+    setUnreadFriendships(prev => {
+      if (!prev.has(friendshipId)) return prev;
+      const next = new Set(prev); next.delete(friendshipId); return next;
+    });
+    const name = userRef.current?.name;
+    if (!name) return;
+    const key = `ss_last_viewed_${name}`;
+    try {
+      const lv = JSON.parse(localStorage.getItem(key) || '{}');
+      const now = Date.now();
+      const latest = latestSentAt ? new Date(latestSentAt).getTime() : 0;
+      lv[friendshipId] = new Date(Math.max(now, latest, lv[friendshipId] ? new Date(lv[friendshipId]).getTime() : 0)).toISOString();
+      localStorage.setItem(key, JSON.stringify(lv));
+    } catch { /* storage unavailable — the in-memory state is still cleared */ }
+  };
+
   const loadUnreadStatus = async (currentUser) => {
     const r = await fetch('/api/friends/latest-activity', { credentials: 'include' });
     if (!r.ok) return;
     const activities = await r.json();
     const key = `ss_last_viewed_${currentUser.name}`;
-    const lastViewed = JSON.parse(localStorage.getItem(key) || '{}');
+    let lastViewed = {};
+    try { lastViewed = JSON.parse(localStorage.getItem(key) || '{}'); } catch { /* ignore */ }
     const unread = new Set();
     for (const { friendshipId, sentAt } of activities) {
+      // The swap that's open right now is being looked at, so it's read
+      if (friendshipId === activeFriendshipRef.current?.friendship_id) continue;
       const lv = lastViewed[friendshipId];
       if (!lv || new Date(sentAt) > new Date(lv)) unread.add(friendshipId);
     }
@@ -343,6 +366,7 @@ function App() {
     socket.on('history-updated', (entry) => {
       if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
         setHistory(prev => [entry, ...prev]);
+        markRead(entry.friendshipId, entry.sentAt);
       } else if (entry.sentBy !== userRef.current?.name) {
         setUnreadFriendships(prev => new Set([...prev, entry.friendshipId]));
       }
@@ -378,12 +402,7 @@ function App() {
     setDuplicate(null);
     setReceivedSong(null);
     setHistory([]);
-    // Mark as read
-    setUnreadFriendships(prev => { const next = new Set(prev); next.delete(friendship.friendship_id); return next; });
-    const lvKey = `ss_last_viewed_${userRef.current?.name}`;
-    const lv = JSON.parse(localStorage.getItem(lvKey) || '{}');
-    lv[friendship.friendship_id] = new Date().toISOString();
-    localStorage.setItem(lvKey, JSON.stringify(lv));
+    markRead(friendship.friendship_id);
 
     socket.emit('join-friendship', friendship.friendship_id);
     const [histRes, curRes, myRes] = await Promise.all([
@@ -391,7 +410,11 @@ function App() {
       fetch(`/api/friends/${friendship.friendship_id}/current-song`, { credentials: 'include' }),
       fetch(`/api/friends/${friendship.friendship_id}/my-song`, { credentials: 'include' }),
     ]);
-    if (histRes.ok) setHistory(await histRes.json());
+    if (histRes.ok) {
+      const hist = await histRes.json();
+      setHistory(hist);
+      markRead(friendship.friendship_id, hist[0]?.sentAt);
+    }
     if (curRes.ok) {
       const song = await curRes.json();
       if (song && song.sentBy !== user.name) setReceivedSong(song);
@@ -574,7 +597,7 @@ function App() {
     <div id="screen">
       <header id="title-card">
         <button id="sidebar-toggle" onClick={() => setSidebarOpen(v => !v)} aria-label="Toggle sidebar">
-          <span /><span /><span />
+          <span className="bar" /><span className="bar" /><span className="bar" />
           {unreadFriendships.size > 0 && <span className="unread-badge">{unreadFriendships.size}</span>}
         </button>
         <img src={icon} id="logo" alt='icon' />

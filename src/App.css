@@ -74,7 +74,8 @@
   background: #282828;
 }
 
-#sidebar-toggle span {
+/* .bar only — the unread badge is also a span inside this button */
+#sidebar-toggle .bar {
   display: block;
   width: 20px;
   height: 2px;
@@ -83,7 +84,7 @@
   transition: background 0.15s;
 }
 
-#sidebar-toggle:hover span {
+#sidebar-toggle:hover .bar {
   background: #fff;
 }
 
