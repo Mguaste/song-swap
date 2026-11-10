@@ -320,7 +320,15 @@ function App() {
     loadFriends();
     loadRequests();
     loadUnreadStatus(user);
-    socket.emit('join-user', user.name);
+    // The socket connects at page load, possibly before login, so reconnect to
+    // send the session cookie. Rooms are rejoined on every (re)connect.
+    const joinRooms = () => {
+      socket.emit('join-user');
+      if (activeFriendshipRef.current) socket.emit('join-friendship', activeFriendshipRef.current.friendship_id);
+    };
+    socket.on('connect', joinRooms);
+    socket.disconnect().connect();
+    return () => socket.off('connect', joinRooms);
   }, [user]);
 
   useEffect(() => {
@@ -331,6 +339,7 @@ function App() {
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
     socket.on('send-success', () => { setSent(true); setTimeout(() => { setSent(false); setSongLink(''); }, 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
+    socket.on('send-error', ({ error }) => setVerifyError(error || 'Could not send that song'));
     socket.on('history-updated', (entry) => {
       if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
         setHistory(prev => [entry, ...prev]);
@@ -348,6 +357,7 @@ function App() {
       socket.off('all-songs-cleared');
       socket.off('send-success');
       socket.off('duplicate-song');
+      socket.off('send-error');
       socket.off('history-updated');
       socket.off('history-cleared');
       socket.off('friend-request-received');
@@ -485,7 +495,8 @@ function App() {
   const sendSong = () => {
     if (!songDetails || !activeFriendship) return;
     setDuplicate(null);
-    socket.emit('send-song', { song: songDetails, sentBy: user.name, friendshipId: activeFriendship.friendship_id });
+    setVerifyError('');
+    socket.emit('send-song', { song: songDetails, friendshipId: activeFriendship.friendship_id });
   };
 
   const addFriend = async () => {

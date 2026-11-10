@@ -162,7 +162,7 @@ app.use((req, res, next) => {
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(bodyParser.json());
-app.use(session({
+const sessionMiddleware = session({
   // Sessions live in Postgres so deploys/restarts don't log everyone out
   store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET,
@@ -174,56 +174,102 @@ app.use(session({
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     httpOnly: true,
   },
-}));
+});
+app.use(sessionMiddleware);
+// Give sockets the same session as HTTP requests, so socket events can be
+// tied to the logged-in user instead of trusting names the client sends
+io.engine.use(sessionMiddleware);
+
+// Re-read the session from the store on every event, so a logout or expiry
+// after the socket connected is respected. Resolves to { name } or null.
+const socketUser = (socket) => new Promise((resolve) => {
+  const s = socket.request.session;
+  if (!s?.user) return resolve(null);
+  s.reload((err) => resolve(err ? null : s.user ?? null));
+});
+
+const isFriendshipMember = async (userName, friendshipId) => {
+  const id = Number(friendshipId);
+  if (!Number.isInteger(id)) return false;
+  const { rows } = await pool.query(
+    `SELECT 1 FROM friendships f
+     JOIN users u ON u.id = f.requester_id OR u.id = f.receiver_id
+     WHERE f.id = $1 AND u.name = $2 AND f.status = 'accepted'`,
+    [id, userName]
+  );
+  return rows.length > 0;
+};
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('join-user', (userName) => {
-    socket.join(`user-${userName}`);
+  // Any client-supplied name is ignored; the room comes from the session
+  socket.on('join-user', async () => {
+    try {
+      const user = await socketUser(socket);
+      if (user) socket.join(`user-${user.name}`);
+    } catch (err) { console.error('join-user failed:', err); }
   });
 
-  socket.on('join-friendship', (friendshipId) => {
-    socket.join(`friendship-${friendshipId}`);
+  socket.on('join-friendship', async (friendshipId) => {
+    try {
+      const user = await socketUser(socket);
+      if (user && await isFriendshipMember(user.name, friendshipId)) {
+        socket.join(`friendship-${Number(friendshipId)}`);
+      }
+    } catch (err) { console.error('join-friendship failed:', err); }
   });
 
-  socket.on('send-song', async ({ song, sentBy, friendshipId }) => {
-    const { rows: dup } = await pool.query(
-      `SELECT * FROM song_history WHERE friendship_id = $1
-       AND (
-         ($2::text IS NOT NULL AND odesli_page_url = $2)
-         OR ($3::text IS NOT NULL AND spotify_uri = $3)
-         OR (LOWER(title) = LOWER($4) AND LOWER(artist) = LOWER($5))
-       )
-       LIMIT 1`,
-      [friendshipId, song.odesliPageUrl ?? null, song.spotifyUri ?? null, song.title ?? '', song.artist ?? '']
-    );
-    if (dup.length > 0) {
-      const d = dup[0];
-      socket.emit('duplicate-song', {
-        title: d.title, artist: d.artist, album: d.album,
-        albumArt: d.album_art, spotifyUri: d.spotify_uri,
-        spotifyUrl: d.spotify_url, platformLinks: d.platform_links ?? null,
-        sourceUrl: d.source_url ?? null, odesliPageUrl: d.odesli_page_url ?? null,
-        sentBy: d.sent_by, sentAt: d.sent_at,
-      });
-      return;
+  socket.on('send-song', async ({ song, friendshipId: rawId } = {}) => {
+    try {
+      const user = await socketUser(socket);
+      if (!user) return socket.emit('send-error', { error: 'Your session expired — log in again' });
+      if (!song?.title || !(await isFriendshipMember(user.name, rawId))) {
+        return socket.emit('send-error', { error: 'You can only send songs to your friends' });
+      }
+      const sentBy = user.name;
+      const friendshipId = Number(rawId);
+      const { rows: dup } = await pool.query(
+        `SELECT * FROM song_history WHERE friendship_id = $1
+         AND (
+           ($2::text IS NOT NULL AND odesli_page_url = $2)
+           OR ($3::text IS NOT NULL AND spotify_uri = $3)
+           OR (LOWER(title) = LOWER($4) AND LOWER(artist) = LOWER($5))
+         )
+         LIMIT 1`,
+        [friendshipId, song.odesliPageUrl ?? null, song.spotifyUri ?? null, song.title ?? '', song.artist ?? '']
+      );
+      if (dup.length > 0) {
+        const d = dup[0];
+        socket.emit('duplicate-song', {
+          title: d.title, artist: d.artist, album: d.album,
+          albumArt: d.album_art, spotifyUri: d.spotify_uri,
+          spotifyUrl: d.spotify_url, platformLinks: d.platform_links ?? null,
+          sourceUrl: d.source_url ?? null, odesliPageUrl: d.odesli_page_url ?? null,
+          sentBy: d.sent_by, sentAt: d.sent_at,
+        });
+        return;
+      }
+      await pool.query(
+        `INSERT INTO song_history
+          (title, artist, album, album_art, spotify_uri, spotify_url,
+           platform_links, source_url, odesli_page_url, sent_by, friendship_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [song.title, song.artist, song.album, song.albumArt, song.spotifyUri ?? null,
+         song.spotifyUrl ?? null, song.platformLinks ? JSON.stringify(song.platformLinks) : null,
+         song.sourceUrl ?? null, song.odesliPageUrl ?? null, sentBy, friendshipId]
+      );
+      const entry = { ...song, sentBy, sentAt: new Date().toISOString(), friendshipId };
+      if (!lastSentByFriendship[friendshipId]) lastSentByFriendship[friendshipId] = {};
+      lastSentByFriendship[friendshipId][sentBy] = entry;
+      socket.emit('send-success');
+      socket.to(`friendship-${friendshipId}`).emit('song-received', { ...song, friendshipId });
+      io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
+    } catch (err) {
+      // Without this, a DB error here is an unhandled rejection that kills the server
+      console.error('send-song failed:', err);
+      socket.emit('send-error', { error: 'Could not send that song — try again' });
     }
-    await pool.query(
-      `INSERT INTO song_history
-        (title, artist, album, album_art, spotify_uri, spotify_url,
-         platform_links, source_url, odesli_page_url, sent_by, friendship_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [song.title, song.artist, song.album, song.albumArt, song.spotifyUri ?? null,
-       song.spotifyUrl ?? null, song.platformLinks ? JSON.stringify(song.platformLinks) : null,
-       song.sourceUrl ?? null, song.odesliPageUrl ?? null, sentBy, friendshipId]
-    );
-    const entry = { ...song, sentBy, sentAt: new Date().toISOString(), friendshipId };
-    if (!lastSentByFriendship[friendshipId]) lastSentByFriendship[friendshipId] = {};
-    lastSentByFriendship[friendshipId][sentBy] = entry;
-    socket.emit('send-success');
-    socket.to(`friendship-${friendshipId}`).emit('song-received', { ...song, friendshipId });
-    io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
   });
 
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
@@ -471,7 +517,8 @@ app.get('/api/friends/:id/my-song', requireAuth, (req, res) => {
   res.json(songs[myName] || null);
 });
 
-app.get('/api/history', requireAuth, async (req, res) => {
+// Every friendship's history — admin only (not used by the app UI)
+app.get('/api/history', requireAdmin, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM song_history ORDER BY sent_at ASC');
   res.json(rows.map(r => ({
     title: r.title, artist: r.artist, album: r.album,
