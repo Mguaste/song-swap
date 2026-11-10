@@ -886,6 +886,13 @@ img.album-art {
 
 .register-platform-select option { background: #2a2a2a; }
 
+.register-platform-label {
+  font-size: 0.78rem;
+  color: #8a8a8a;
+  text-align: left;
+  margin: 4px 2px -4px;
+}
+
 #login-form input:focus {
   border-color: #10B981;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);

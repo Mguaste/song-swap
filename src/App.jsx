@@ -67,7 +67,8 @@ function RegisterForm({ onLogin }) {
       <input placeholder="Username" value={name} onChange={e => setName(e.target.value)} />
       <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
       <input type="password" placeholder="Confirm Password" value={confirm} onChange={e => setConfirm(e.target.value)} />
-      <select value={preferredPlatform} onChange={e => setPreferredPlatform(e.target.value)} className="register-platform-select">
+      <label htmlFor="register-platform" className="register-platform-label">Preferred music app</label>
+      <select id="register-platform" value={preferredPlatform} onChange={e => setPreferredPlatform(e.target.value)} className="register-platform-select">
         <option value="spotify">Spotify</option>
         <option value="appleMusic">Apple Music</option>
         <option value="youtubeMusic">YouTube Music</option>
@@ -249,6 +250,8 @@ function App() {
   // Swap lane
   const [songLink, setSongLink] = useState('');
   const [sent, setSent] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const verifyReqRef = useRef(0); // ignore responses for a link that's since been changed
   const [denied, setDenied] = useState(false);
   const [duplicate, setDuplicate] = useState(null);
   const [songDetails, setSongDetails] = useState(null);
@@ -490,18 +493,24 @@ function App() {
     setTimeout(() => { if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank'); }, 1000);
   };
 
-  const verifySong = async () => {
+  // Called with a link (on paste) or with a click/key event (uses the input's value)
+  const verifySong = async (linkArg) => {
+    const link = (typeof linkArg === 'string' ? linkArg : songLink).trim();
+    if (!link) return;
+    const reqId = ++verifyReqRef.current;
     setVerifyError('');
     setSongDetails(null);
+    setVerifying(true);
     try {
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ link: songLink }),
+        body: JSON.stringify({ link }),
       });
       // A proxy error page (Cloudflare/Railway) isn't JSON — don't mistake that for a network failure
       const data = await res.json().catch(() => ({}));
+      if (reqId !== verifyReqRef.current) return;
       if (!res.ok) {
         if (res.status === 401) setVerifyError('Your session expired — log in again');
         else if (data.error) setVerifyError(data.error);
@@ -511,7 +520,9 @@ function App() {
       }
       setSongDetails(data);
     } catch {
-      setVerifyError('Network error — check your connection');
+      if (reqId === verifyReqRef.current) setVerifyError('Network error — check your connection');
+    } finally {
+      if (reqId === verifyReqRef.current) setVerifying(false);
     }
   };
 
@@ -606,7 +617,7 @@ function App() {
         </h1>
         <div id="user-info">
           <span id="user-name">{user.name}</span>
-          {user.name === 'Mguaste' && (
+          {user.is_admin && (
             <button id="admin-btn" onClick={() => setShowAdmin(v => !v)}>Admin</button>
           )}
           <button id="settings-btn" onClick={() => setShowSettings(v => !v)} aria-label="Settings">
@@ -769,7 +780,7 @@ function App() {
                 </div>
               </div>
 
-              {user.name === 'Mguaste' && (
+              {user.is_admin && (
                 <div className="settings-section">
                   <h2 className="settings-section-title">Admin</h2>
                   <div className="settings-row">
@@ -822,11 +833,19 @@ function App() {
                     <input
                       placeholder="Paste a music link..."
                       value={songLink}
-                      onChange={(e) => { setSongLink(e.target.value); setSongDetails(null); setDuplicate(null); setVerifyError(''); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter') songDetails ? sendSong() : verifySong(); }}
+                      onChange={(e) => { verifyReqRef.current++; setVerifying(false); setSongLink(e.target.value); setSongDetails(null); setDuplicate(null); setVerifyError(''); }}
+                      onPaste={(e) => {
+                        // Look the song up as soon as a link is pasted into an empty box
+                        const text = e.clipboardData.getData('text').trim();
+                        if (songLink.trim() || !/^(https?:\/\/|spotify:)/i.test(text)) return;
+                        e.preventDefault();
+                        setSongLink(text); setDuplicate(null);
+                        verifySong(text);
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !verifying) songDetails ? sendSong() : verifySong(); }}
                     />
-                    <button onClick={songDetails ? sendSong : verifySong} disabled={sent || denied}>
-                      {songDetails ? 'Send' : 'Verify'}
+                    <button onClick={songDetails ? sendSong : verifySong} disabled={sent || denied || verifying}>
+                      {verifying ? 'Checking…' : songDetails ? 'Send' : 'Verify'}
                     </button>
                   </div>
                   {verifyError && <p id="duplicate-warning">{verifyError}</p>}

@@ -67,6 +67,10 @@ const initDb = async () => {
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS source_url TEXT');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS odesli_page_url TEXT');
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_platform TEXT DEFAULT 'spotify'");
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE');
+  // One-time: carry over the original hard-coded admin if no admin exists yet
+  await pool.query(`UPDATE users SET is_admin = TRUE
+    WHERE LOWER(name) = 'mguaste' AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)`);
 
   // Generate friend codes for existing users that don't have one
   const { rows: needsCodes } = await pool.query('SELECT id FROM users WHERE friend_code IS NULL');
@@ -138,16 +142,20 @@ const clearLastSent = () => {
   for (const k of Object.keys(lastSentByFriendship)) delete lastSentByFriendship[k];
 };
 
+// Current songs clear at midnight in RESET_TIMEZONE (the server itself runs
+// on UTC). Checking the local date once a minute handles DST without math.
+const RESET_TIMEZONE = process.env.RESET_TIMEZONE || 'America/Los_Angeles';
+const localDate = () => new Date().toLocaleDateString('en-CA', { timeZone: RESET_TIMEZONE });
 const scheduleMidnightClear = () => {
-  const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24, 0, 0, 0);
-  setTimeout(() => {
+  let today = localDate();
+  setInterval(() => {
+    const now = localDate();
+    if (now === today) return;
+    today = now;
     clearLastSent();
     io.emit('song-cleared');
-    console.log('Song cleared at midnight');
-    scheduleMidnightClear();
-  }, midnight - now);
+    console.log(`Songs cleared at midnight (${RESET_TIMEZONE})`);
+  }, 60 * 1000).unref();
 };
 
 app.use((req, res, next) => {
@@ -281,8 +289,11 @@ const requireAuth = (req, res, next) => {
   res.status(401).json({ error: 'Not authenticated' });
 };
 
-const requireAdmin = (req, res, next) => {
-  if (req.session.user?.name === 'Mguaste') return next();
+const requireAdmin = async (req, res, next) => {
+  if (req.session.user) {
+    const { rows } = await pool.query('SELECT is_admin FROM users WHERE name = $1', [req.session.user.name]);
+    if (rows[0]?.is_admin) return next();
+  }
   res.status(403).json({ error: 'Forbidden' });
 };
 
@@ -344,7 +355,7 @@ app.post('/api/login', authLimiter, async (req, res) => {
 
 app.get('/api/me', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    "SELECT name, friend_code, COALESCE(preferred_platform, 'spotify') AS preferred_platform FROM users WHERE name = $1",
+    "SELECT name, friend_code, COALESCE(preferred_platform, 'spotify') AS preferred_platform, is_admin FROM users WHERE name = $1",
     [req.session.user.name]
   );
   res.json(rows[0]);
