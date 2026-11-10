@@ -54,25 +54,18 @@ const initDb = async () => {
       friendship_id INT REFERENCES friendships(id),
       sent_at TIMESTAMPTZ DEFAULT NOW()
     );
-    CREATE TABLE IF NOT EXISTS spotify_tokens (
-      id INT PRIMARY KEY DEFAULT 1,
-      refresh_token TEXT
-    );
   `);
 
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS friend_code TEXT UNIQUE');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS friendship_id INT REFERENCES friendships(id)');
   await pool.query('ALTER TABLE song_history DROP CONSTRAINT IF EXISTS song_history_spotify_uri_key');
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS user_spotify_tokens (
-      user_id       INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      refresh_token TEXT NOT NULL,
-      updated_at    TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS spotify_playlist_id TEXT');
-  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS playlist_creating BOOLEAN DEFAULT FALSE');
+  // Leftovers from the retired Spotify playlist feature: stored users' Spotify
+  // refresh tokens, which nothing uses anymore. Remove them (no-op once gone).
+  await pool.query('DROP TABLE IF EXISTS user_spotify_tokens');
+  await pool.query('DROP TABLE IF EXISTS spotify_tokens');
+  await pool.query('ALTER TABLE friendships DROP COLUMN IF EXISTS spotify_playlist_id');
+  await pool.query('ALTER TABLE friendships DROP COLUMN IF EXISTS playlist_creating');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS platform_links JSONB');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS source_url TEXT');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS odesli_page_url TEXT');
@@ -95,17 +88,6 @@ const initDb = async () => {
       unique = rows.length === 0;
     }
     await pool.query('UPDATE users SET friend_code = $1 WHERE id = $2', [code, user.id]);
-  }
-
-  // Migrate singleton Spotify token → per-user table (one-time, idempotent)
-  const { rows: adminUser } = await pool.query(`SELECT id FROM users WHERE LOWER(name) = 'mguaste'`);
-  const { rows: oldToken } = await pool.query('SELECT refresh_token FROM spotify_tokens WHERE id = 1');
-  if (adminUser[0] && oldToken[0]?.refresh_token) {
-    await pool.query(
-      `INSERT INTO user_spotify_tokens (user_id, refresh_token) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING`,
-      [adminUser[0].id, oldToken[0].refresh_token]
-    );
-    console.log('Migrated singleton Spotify token to Mguaste user record.');
   }
 
   // Seed env-var users if table is empty
