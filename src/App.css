@@ -1572,3 +1572,44 @@ img.album-art {
   .landing-steps-row { grid-template-columns: 1fr; gap: 28px; }
   #landing-cta h2 { font-size: 1.6rem; }
 }
+
+/* ── Invite link / remove friend ── */
+
+#invite-link-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px 10px;
+}
+
+#invite-note {
+  font-size: 0.82rem;
+  color: #10B981;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+}
+
+#remove-friend-row {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 32px;
+}
+
+#remove-friend-btn {
+  background: transparent;
+  border: 1px solid #3a3a3a;
+  border-radius: 20px;
+  color: #777;
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+#remove-friend-btn:hover {
+  border-color: #ff5555;
+  color: #ff5555;
+}

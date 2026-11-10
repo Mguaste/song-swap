@@ -231,10 +231,27 @@ function LandingPage({ onLogin, onSignup }) {
   );
 }
 
+// /add/ABC123 invite links: remember the code (survives sign-up/log-in), then
+// clean the URL. The code is turned into a friend request once logged in.
+const INVITE_KEY = 'ss_pending_invite';
+const readPendingInvite = () => {
+  const m = window.location.pathname.match(/^\/add\/([A-Za-z0-9]{6})\/?$/);
+  try {
+    if (m) {
+      sessionStorage.setItem(INVITE_KEY, m[1].toUpperCase());
+      window.history.replaceState(null, '', '/');
+    }
+    return sessionStorage.getItem(INVITE_KEY);
+  } catch { return m ? m[1].toUpperCase() : null; }
+};
+const clearPendingInvite = () => { try { sessionStorage.removeItem(INVITE_KEY); } catch { /* ignore */ } };
+
 function App() {
   const [user, setUser] = useState(undefined);
-  const [authMode, setAuthMode] = useState('login');
-  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState(() => (readPendingInvite() ? 'register' : 'login'));
+  const [pendingInvite, setPendingInvite] = useState(readPendingInvite);
+  // Arriving logged out from an invite link goes straight to sign-up
+  const [showAuth, setShowAuth] = useState(() => !!pendingInvite);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Friends
@@ -246,6 +263,7 @@ function App() {
   const [addCodeError, setAddCodeError] = useState('');
   const [addCodeSuccess, setAddCodeSuccess] = useState('');
   const [copied, setCopied] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   // Swap lane
   const [songLink, setSongLink] = useState('');
@@ -346,6 +364,14 @@ function App() {
     loadFriends();
     loadRequests();
     loadUnreadStatus(user);
+    if (pendingInvite) {
+      clearPendingInvite();
+      setPendingInvite(null);
+      if (pendingInvite !== user.friend_code) {
+        setSidebarOpen(true);
+        addFriend(pendingInvite);
+      }
+    }
     // The socket connects at page load, possibly before login, so reconnect to
     // send the session cookie. Rooms are rejoined on every (re)connect.
     const joinRooms = () => {
@@ -377,6 +403,7 @@ function App() {
     socket.on('history-cleared', () => setHistory([]));
     socket.on('friend-request-received', () => loadRequests());
     socket.on('friendship-accepted', () => { loadFriends(); loadRequests(); });
+    socket.on('friendship-removed', ({ friendshipId }) => closeFriendship(friendshipId));
     socket.on('friend-request-declined', () => loadRequests());
     return () => {
       socket.off('song-received');
@@ -389,6 +416,7 @@ function App() {
       socket.off('history-cleared');
       socket.off('friend-request-received');
       socket.off('friendship-accepted');
+      socket.off('friendship-removed');
       socket.off('friend-request-declined');
     };
   }, []);
@@ -533,18 +561,56 @@ function App() {
     socket.emit('send-song', { song: songDetails, friendshipId: activeFriendship.friendship_id });
   };
 
-  const addFriend = async () => {
+  // Called with a code (from an invite link) or from the Add button (uses the input)
+  const addFriend = async (codeArg) => {
+    const code = typeof codeArg === 'string' ? codeArg : addCodeInput;
     setAddCodeError('');
     setAddCodeSuccess('');
     const r = await fetch('/api/friends/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ friendCode: addCodeInput }),
+      body: JSON.stringify({ friendCode: code }),
     });
-    const data = await r.json();
+    const data = await r.json().catch(() => ({}));
     if (r.ok) { setAddCodeSuccess(data.message); setAddCodeInput(''); }
-    else setAddCodeError(data.error);
+    else setAddCodeError(data.error || 'Could not add that friend');
+  };
+
+  const removeFriend = async () => {
+    const f = activeFriendship;
+    if (!f) return;
+    if (!window.confirm(`Remove ${f.friend_name}? This permanently deletes your whole swap history with them.`)) return;
+    const r = await fetch(`/api/friends/${f.friendship_id}`, { method: 'DELETE', credentials: 'include' });
+    if (!r.ok) { setVerifyError('Could not remove friend — try again'); return; }
+    closeFriendship(f.friendship_id);
+  };
+
+  // Leave a friendship's view after it's removed (by either person)
+  const closeFriendship = (friendshipId) => {
+    setUnreadFriendships(prev => { const next = new Set(prev); next.delete(friendshipId); return next; });
+    if (activeFriendshipRef.current?.friendship_id === friendshipId) {
+      activeFriendshipRef.current = null;
+      setActiveFriendship(null);
+      setHistory([]);
+      setReceivedSong(null);
+      setSongDetails(null);
+    }
+    loadFriends();
+  };
+
+  const shareInvite = async () => {
+    const url = `${window.location.origin}/add/${user.friend_code}`;
+    // Phones get the native share sheet; desktops copy to the clipboard
+    if (navigator.share && window.matchMedia('(pointer: coarse)').matches) {
+      try { await navigator.share({ title: 'Song Swap', text: 'Swap songs with me on Song Swap', url }); } catch { /* cancelled */ }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch { window.prompt('Copy your invite link:', url); }
   };
 
   const acceptRequest = async (id) => {
@@ -585,6 +651,7 @@ function App() {
         <p id="login-subtitle">
           {authMode === 'login' ? 'Log in to your Song Swap account' : 'Create your free Song Swap account'}
         </p>
+        {pendingInvite && <p id="invite-note">You've been invited to swap songs — sign up or log in and we'll send the friend request.</p>}
         {authMode === 'login'
           ? <LoginForm onLogin={loadMe} />
           : <RegisterForm onLogin={loadMe} />
@@ -641,6 +708,9 @@ function App() {
                 <span id="friend-code-value">{user.friend_code}</span>
                 <button className="copy-btn" onClick={copyCode}>{copied ? '✓' : 'Copy'}</button>
               </div>
+              <button id="invite-link-btn" className="copy-btn" onClick={shareInvite}>
+                {inviteCopied ? '✓ Invite link copied' : 'Share invite link'}
+              </button>
             </div>
 
             {/* Add friend */}
@@ -888,6 +958,9 @@ function App() {
                 </div>
               )}
 
+              <div id="remove-friend-row">
+                <button id="remove-friend-btn" onClick={removeFriend}>Remove {activeFriendship.friend_name}</button>
+              </div>
             </>
           )}
         </main>

@@ -459,6 +459,42 @@ app.delete('/api/friends/requests/:id', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+// Remove a friend: deletes the friendship and its whole song history
+app.delete('/api/friends/:id', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid friend' });
+  const client = await pool.connect();
+  let names;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT u1.name AS a, u2.name AS b FROM friendships f
+       JOIN users u1 ON u1.id = f.requester_id
+       JOIN users u2 ON u2.id = f.receiver_id
+       WHERE f.id = $1 AND f.status = 'accepted' AND (u1.name = $2 OR u2.name = $2)
+       FOR UPDATE OF f`,
+      [id, req.session.user.name]
+    );
+    if (rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Friend not found' });
+    }
+    names = [rows[0].a, rows[0].b];
+    await client.query('DELETE FROM song_history WHERE friendship_id = $1', [id]);
+    await client.query('DELETE FROM friendships WHERE id = $1', [id]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  delete lastSentByFriendship[id];
+  io.in(`friendship-${id}`).socketsLeave(`friendship-${id}`);
+  for (const n of names) io.to(`user-${n}`).emit('friendship-removed', { friendshipId: id });
+  res.json({ success: true });
+});
+
 // List accepted friends
 app.get('/api/friends', requireAuth, async (req, res) => {
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
