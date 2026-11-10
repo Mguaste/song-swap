@@ -958,9 +958,9 @@ function App() {
               <img src={icon} id="empty-logo" alt="icon" />
               <h2 id="onboarding-title">Swap songs with a friend</h2>
               <ol id="onboarding-steps">
-                <li><strong>Share your invite link</strong> with a friend</li>
-                <li><strong>They sign up</strong> and you accept their request</li>
-                <li><strong>Swap a song</strong> — paste a link from any music app</li>
+                <li><span><strong>Share your invite link</strong> with a friend</span></li>
+                <li><span><strong>They sign up</strong> and you accept their request</span></li>
+                <li><span><strong>Swap a song</strong> — paste a link from any music app</span></li>
               </ol>
               <button id="onboarding-invite-btn" onClick={shareInvite}>
                 {inviteCopied ? '✓ Invite link copied' : 'Share invite link'}
