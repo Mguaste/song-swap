@@ -401,6 +401,20 @@ app.post('/api/friends/add', requireAuth, async (req, res) => {
 });
 
 // Get incoming pending friend requests
+// Outgoing friend requests that haven't been answered yet
+app.get('/api/friends/sent', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT f.id, u.name AS to_name, f.created_at
+     FROM friendships f
+     JOIN users me ON me.id = f.requester_id
+     JOIN users u ON u.id = f.receiver_id
+     WHERE me.name = $1 AND f.status = 'pending'
+     ORDER BY f.created_at DESC`,
+    [req.session.user.name]
+  );
+  res.json(rows);
+});
+
 app.get('/api/friends/requests', requireAuth, async (req, res) => {
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
   const { rows } = await pool.query(

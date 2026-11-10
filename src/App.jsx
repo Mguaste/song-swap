@@ -294,6 +294,7 @@ function App() {
   // Friends
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
+  const [sentRequests, setSentRequests] = useState([]);
   const [activeFriendship, setActiveFriendship] = useState(null);
   const activeFriendshipRef = useRef(null);
   const [addCodeInput, setAddCodeInput] = useState('');
@@ -351,9 +352,14 @@ function App() {
     return friends;
   };
 
+  // Incoming and outgoing pending requests
   const loadRequests = async () => {
-    const r = await fetch('/api/friends/requests', { credentials: 'include' });
+    const [r, s] = await Promise.all([
+      fetch('/api/friends/requests', { credentials: 'include' }),
+      fetch('/api/friends/sent', { credentials: 'include' }),
+    ]);
     if (r.ok) setFriendRequests(await r.json());
+    if (s.ok) setSentRequests(await s.json());
   };
 
   // Record that this friendship's swap has been seen. Uses the newest known
@@ -615,7 +621,7 @@ function App() {
       body: JSON.stringify({ friendCode: code }),
     });
     const data = await r.json().catch(() => ({}));
-    if (r.ok) { setAddCodeSuccess(data.message); setAddCodeInput(''); }
+    if (r.ok) { setAddCodeSuccess(data.message); setAddCodeInput(''); loadRequests(); }
     else setAddCodeError(data.error || 'Could not add that friend');
   };
 
@@ -814,6 +820,24 @@ function App() {
               </div>
             )}
 
+            {/* Sent requests (waiting on the other person) */}
+            {sentRequests.length > 0 && (
+              <div className="sidebar-section">
+                <p className="sidebar-label">Sent</p>
+                {sentRequests.map(req => (
+                  <div key={req.id} className="request-item">
+                    <span className="request-name">
+                      {req.to_name}
+                      <span className="request-waiting"> · waiting</span>
+                    </span>
+                    <div className="request-actions">
+                      <button className="decline-btn" title="Cancel request" aria-label={`Cancel request to ${req.to_name}`} onClick={() => declineRequest(req.id)}>✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Friends list */}
             <div className="sidebar-section sidebar-friends">
               <p className="sidebar-label">Friends</p>
@@ -927,6 +951,32 @@ function App() {
                     <button className="settings-danger-btn" onClick={() => fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' })}>Clear Current Songs</button>
                   </div>
                 </div>
+              )}
+            </div>
+          ) : !activeFriendship && friends.length === 0 ? (
+            <div id="empty-state" className="onboarding">
+              <img src={icon} id="empty-logo" alt="icon" />
+              <h2 id="onboarding-title">Swap songs with a friend</h2>
+              <ol id="onboarding-steps">
+                <li><strong>Share your invite link</strong> with a friend</li>
+                <li><strong>They sign up</strong> and you accept their request</li>
+                <li><strong>Swap a song</strong> — paste a link from any music app</li>
+              </ol>
+              <button id="onboarding-invite-btn" onClick={shareInvite}>
+                {inviteCopied ? '✓ Invite link copied' : 'Share invite link'}
+              </button>
+              <p id="onboarding-code">
+                or give them your code <span>{user.friend_code}</span>
+              </p>
+              {sentRequests.length > 0 && (
+                <p id="onboarding-waiting">
+                  Waiting on {sentRequests.map(r => r.to_name).join(', ')} to accept
+                </p>
+              )}
+              {friendRequests.length > 0 && (
+                <button className="link-btn" onClick={() => setSidebarOpen(true)}>
+                  You have {friendRequests.length} friend request{friendRequests.length > 1 ? 's' : ''} — open sidebar
+                </button>
               )}
             </div>
           ) : !activeFriendship ? (
