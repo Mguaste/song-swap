@@ -683,7 +683,7 @@ img.album-art {
 
 .history-entry {
   display: grid;
-  grid-template-columns: 28px 40px 1fr;
+  grid-template-columns: 28px 40px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 8px 10px;
@@ -1613,3 +1613,47 @@ img.album-art {
   border-color: #ff5555;
   color: #ff5555;
 }
+
+/* ── Star ratings ── */
+
+.star-rating {
+  display: inline-flex;
+  gap: 2px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.star-rating .star {
+  font-size: 0.95rem;
+  line-height: 1;
+  color: #3a3a3a;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  transition: color 0.1s, transform 0.1s;
+}
+
+.star-rating .star.on { color: #10B981; }
+.star-rating button.star { cursor: pointer; padding: 2px; }
+.star-rating button.star:hover { transform: scale(1.15); }
+.star-rating button.star:focus-visible { outline: 2px solid #10B981; outline-offset: 1px; border-radius: 3px; }
+
+.star-rating.large .star { font-size: 1.5rem; }
+
+.card-rating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+p.card-rating { flex-direction: row; justify-content: center; gap: 6px; }
+
+.rating-pending { font-size: 0.75rem; color: #666; }
+
+.history-stars { padding-left: 4px; }
+.history-stars.readonly .star { font-size: 0.8rem; }

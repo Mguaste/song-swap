@@ -5,6 +5,43 @@ import icon from './assets/SSLogo.png'
 
 const socket = io();
 
+// 1–5 stars. Interactive when onRate is given, otherwise display-only.
+function StarRating({ value, onRate, className = '' }) {
+  const [hover, setHover] = useState(0);
+  const shown = hover || value || 0;
+  if (!onRate) {
+    return (
+      <span className={`star-rating readonly ${className}`} aria-label={value ? `Rated ${value} out of 5` : 'Not rated yet'}>
+        {[1, 2, 3, 4, 5].map(n => <span key={n} className={`star${n <= shown ? ' on' : ''}`}>★</span>)}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`star-rating ${className}`}
+      role="radiogroup"
+      aria-label="Rate this song"
+      onMouseLeave={() => setHover(0)}
+      onClick={e => e.stopPropagation()}
+    >
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n}
+          type="button"
+          role="radio"
+          aria-checked={value === n}
+          aria-label={`${n} star${n > 1 ? 's' : ''}`}
+          className={`star${n <= shown ? ' on' : ''}`}
+          onMouseEnter={() => setHover(n)}
+          onFocus={() => setHover(n)}
+          onBlur={() => setHover(0)}
+          onClick={() => onRate(n)}
+        >★</button>
+      ))}
+    </span>
+  );
+}
+
 function AlbumArtPlaceholder() {
   return (
     <div className="album-art album-art-placeholder">
@@ -388,6 +425,7 @@ function App() {
       if (song.friendshipId === activeFriendshipRef.current?.friendship_id) setReceivedSong(song);
     });
     socket.on('song-cleared', () => setReceivedSong(null));
+    socket.on('song-rated', applyRating);
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
     socket.on('send-success', () => { setSent(true); setTimeout(() => { setSent(false); setSongLink(''); }, 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
@@ -395,6 +433,9 @@ function App() {
     socket.on('history-updated', (entry) => {
       if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
         setHistory(prev => [entry, ...prev]);
+        if (entry.sentBy === userRef.current?.name) {
+          setSongDetails(prev => (prev && !prev.id && prev.title === entry.title ? { ...prev, id: entry.id, rating: null } : prev));
+        }
         markRead(entry.friendshipId, entry.sentAt);
       } else if (entry.sentBy !== userRef.current?.name) {
         setUnreadFriendships(prev => new Set([...prev, entry.friendshipId]));
@@ -408,6 +449,7 @@ function App() {
     return () => {
       socket.off('song-received');
       socket.off('song-cleared');
+      socket.off('song-rated');
       socket.off('all-songs-cleared');
       socket.off('send-success');
       socket.off('duplicate-song');
@@ -575,6 +617,29 @@ function App() {
     const data = await r.json().catch(() => ({}));
     if (r.ok) { setAddCodeSuccess(data.message); setAddCodeInput(''); }
     else setAddCodeError(data.error || 'Could not add that friend');
+  };
+
+  const applyRating = ({ id, rating }) => {
+    setHistory(prev => prev.map(e => (e.id === id ? { ...e, rating } : e)));
+    setReceivedSong(prev => (prev?.id === id ? { ...prev, rating } : prev));
+    setSongDetails(prev => (prev?.id === id ? { ...prev, rating } : prev));
+  };
+
+  const rateSong = async (entry, rating) => {
+    const previous = entry.rating ?? null;
+    applyRating({ id: entry.id, rating }); // optimistic
+    try {
+      const r = await fetch(`/api/songs/${entry.id}/rating`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ rating }),
+      });
+      if (!r.ok) throw new Error();
+    } catch {
+      applyRating({ id: entry.id, rating: previous });
+      setVerifyError('Could not save your rating — try again');
+    }
   };
 
   const removeFriend = async () => {
@@ -898,6 +963,13 @@ function App() {
                     <h3>{songDetails ? songDetails.title : 'Song Title'}</h3>
                     <p>Artist: {songDetails ? songDetails.artist : 'Artist Name'}</p>
                     <p>Album: {songDetails ? songDetails.album : 'Album Name'}</p>
+                    {songDetails?.id && (
+                      <p className="card-rating">
+                        {songDetails.rating
+                          ? <>{activeFriendship.friend_name} rated it <StarRating value={songDetails.rating} /></>
+                          : <span className="rating-pending">Not rated yet</span>}
+                      </p>
+                    )}
                   </div>
                   <div className="input-group">
                     <input
@@ -936,6 +1008,12 @@ function App() {
                     <h3>{receivedSong ? receivedSong.title : 'Song Title'}</h3>
                     <p>Artist: {receivedSong ? receivedSong.artist : 'Artist Name'}</p>
                     <p>Album: {receivedSong ? receivedSong.album : 'Album Name'}</p>
+                    {receivedSong?.id && (
+                      <div className="card-rating">
+                        <StarRating value={receivedSong.rating} onRate={n => rateSong(receivedSong, n)} className="large" />
+                        <span className="rating-pending">{receivedSong.rating ? 'Your rating' : 'Rate this song'}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -945,13 +1023,16 @@ function App() {
                   <h2 id="history-title">History</h2>
                   <div id="history-list">
                     {history.map((entry, i) => (
-                      <div key={i} className="history-entry" onClick={() => openSong(entry)}>
+                      <div key={entry.id ?? i} className="history-entry" onClick={() => openSong(entry)}>
                         <span className="history-index">{history.length - i}</span>
                         <img src={entry.albumArt} alt="art" className="history-art" />
                         <div className="history-info">
                           <span className="history-song">{entry.title}</span>
                           <span className="history-meta">{entry.artist} · {entry.sentBy} · {new Date(entry.sentAt).toLocaleDateString()}</span>
                         </div>
+                        {entry.id && (entry.sentBy === user.name
+                          ? <StarRating value={entry.rating} className="history-stars" />
+                          : <StarRating value={entry.rating} onRate={n => rateSong(entry, n)} className="history-stars" />)}
                       </div>
                     ))}
                   </div>

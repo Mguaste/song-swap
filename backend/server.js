@@ -13,6 +13,16 @@ require('dotenv').config();
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
+// song_history row → the shape the frontend uses
+const rowToEntry = (r) => ({
+  id: r.id,
+  title: r.title, artist: r.artist, album: r.album,
+  albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
+  platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
+  odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
+  friendshipId: r.friendship_id, rating: r.rating ?? null,
+});
+
 const generateFriendCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 const initDb = async () => {
@@ -68,6 +78,9 @@ const initDb = async () => {
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS odesli_page_url TEXT');
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_platform TEXT DEFAULT 'spotify'");
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE');
+  // 1–5 rating, set only by the friend who received the song
+  await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating BETWEEN 1 AND 5)');
+  await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ');
   // One-time: carry over the original hard-coded admin if no admin exists yet
   await pool.query(`UPDATE users SET is_admin = TRUE
     WHERE LOWER(name) = 'mguaste' AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)`);
@@ -248,30 +261,24 @@ io.on('connection', (socket) => {
         [friendshipId, song.odesliPageUrl ?? null, song.spotifyUri ?? null, song.title ?? '', song.artist ?? '']
       );
       if (dup.length > 0) {
-        const d = dup[0];
-        socket.emit('duplicate-song', {
-          title: d.title, artist: d.artist, album: d.album,
-          albumArt: d.album_art, spotifyUri: d.spotify_uri,
-          spotifyUrl: d.spotify_url, platformLinks: d.platform_links ?? null,
-          sourceUrl: d.source_url ?? null, odesliPageUrl: d.odesli_page_url ?? null,
-          sentBy: d.sent_by, sentAt: d.sent_at,
-        });
+        socket.emit('duplicate-song', rowToEntry(dup[0]));
         return;
       }
-      await pool.query(
+      const { rows: inserted } = await pool.query(
         `INSERT INTO song_history
           (title, artist, album, album_art, spotify_uri, spotify_url,
            platform_links, source_url, odesli_page_url, sent_by, friendship_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         RETURNING *`,
         [song.title, song.artist, song.album, song.albumArt, song.spotifyUri ?? null,
          song.spotifyUrl ?? null, song.platformLinks ? JSON.stringify(song.platformLinks) : null,
          song.sourceUrl ?? null, song.odesliPageUrl ?? null, sentBy, friendshipId]
       );
-      const entry = { ...song, sentBy, sentAt: new Date().toISOString(), friendshipId };
+      const entry = rowToEntry(inserted[0]);
       if (!lastSentByFriendship[friendshipId]) lastSentByFriendship[friendshipId] = {};
       lastSentByFriendship[friendshipId][sentBy] = entry;
       socket.emit('send-success');
-      socket.to(`friendship-${friendshipId}`).emit('song-received', { ...song, friendshipId });
+      socket.to(`friendship-${friendshipId}`).emit('song-received', entry);
       io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
     } catch (err) {
       // Without this, a DB error here is an unhandled rejection that kills the server
@@ -540,12 +547,35 @@ app.get('/api/friends/:id/history', requireAuth, async (req, res) => {
     'SELECT * FROM song_history WHERE friendship_id = $1 ORDER BY sent_at DESC',
     [req.params.id]
   );
-  res.json(rows.map(r => ({
-    title: r.title, artist: r.artist, album: r.album,
-    albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
-    platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
-    odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
-  })));
+  res.json(rows.map(rowToEntry));
+});
+
+// Rate a received song 1–5. Only the friend it was sent to can rate it.
+app.post('/api/songs/:id/rating', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  const rating = Number(req.body?.rating);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid song' });
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Rating must be 1–5' });
+  }
+  const me = req.session.user.name;
+  const { rows } = await pool.query(
+    `UPDATE song_history sh SET rating = $1, rated_at = NOW()
+     FROM friendships f
+     JOIN users u ON u.id = f.requester_id OR u.id = f.receiver_id
+     WHERE sh.id = $2 AND f.id = sh.friendship_id AND f.status = 'accepted'
+       AND u.name = $3 AND sh.sent_by <> $3
+     RETURNING sh.id, sh.friendship_id, sh.sent_by, sh.rating`,
+    [rating, id, me]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: "You can only rate songs sent to you" });
+  const r = rows[0];
+  const current = lastSentByFriendship[r.friendship_id]?.[r.sent_by];
+  if (current?.id === r.id) current.rating = r.rating;
+  const update = { id: r.id, friendshipId: r.friendship_id, rating: r.rating };
+  io.to(`friendship-${r.friendship_id}`).emit('song-rated', update);
+  io.to(`user-${r.sent_by}`).emit('song-rated', update);
+  res.json(update);
 });
 
 // Current song from the other person in a friendship
@@ -567,12 +597,7 @@ app.get('/api/friends/:id/my-song', requireAuth, (req, res) => {
 // Every friendship's history — admin only (not used by the app UI)
 app.get('/api/history', requireAdmin, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM song_history ORDER BY sent_at ASC');
-  res.json(rows.map(r => ({
-    title: r.title, artist: r.artist, album: r.album,
-    albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
-    platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
-    odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
-  })));
+  res.json(rows.map(rowToEntry));
 });
 
 app.delete('/api/admin/history', requireAdmin, async (req, res) => {
@@ -1023,12 +1048,7 @@ initDb().then(async () => {
   for (const r of rows) {
     if (!r.friendship_id) continue;
     if (!lastSentByFriendship[r.friendship_id]) lastSentByFriendship[r.friendship_id] = {};
-    lastSentByFriendship[r.friendship_id][r.sent_by] = {
-      title: r.title, artist: r.artist, album: r.album,
-      albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
-      platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
-      odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
-    };
+    lastSentByFriendship[r.friendship_id][r.sent_by] = rowToEntry(r);
   }
   server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
