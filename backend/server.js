@@ -84,6 +84,16 @@ const initDb = async () => {
   // 1–5 rating, set only by the friend who received the song
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating BETWEEN 1 AND 5)');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ');
+  // When each user last looked at each swap, so unread status follows the
+  // account across devices instead of living in one browser's localStorage
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS friendship_reads (
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      friendship_id INT NOT NULL REFERENCES friendships(id) ON DELETE CASCADE,
+      last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, friendship_id)
+    )
+  `);
   // One-time: carry over the original hard-coded admin if no admin exists yet
   await pool.query(`UPDATE users SET is_admin = TRUE
     WHERE LOWER(name) = 'mguaste' AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)`);
@@ -539,20 +549,42 @@ app.get('/api/friends', requireAuth, async (req, res) => {
 });
 
 // Song history for a specific friendship
-// Latest unread activity per friendship (most recent song NOT sent by current user)
+// Latest activity per friendship (most recent song NOT sent by current user),
+// and whether it's unread. Both times come from the DB clock, so device clock
+// skew can't affect it.
 app.get('/api/friends/latest-activity', requireAuth, async (req, res) => {
   const { rows: me } = await pool.query('SELECT id, name FROM users WHERE name = $1', [req.session.user.name]);
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (sh.friendship_id) sh.friendship_id, sh.sent_at, sh.sent_by
+    `SELECT DISTINCT ON (sh.friendship_id) sh.friendship_id, sh.sent_at, sh.sent_by, r.last_read_at
      FROM song_history sh
      JOIN friendships f ON f.id = sh.friendship_id
+     LEFT JOIN friendship_reads r ON r.friendship_id = sh.friendship_id AND r.user_id = $1
      WHERE (f.requester_id = $1 OR f.receiver_id = $1)
        AND f.status = 'accepted'
        AND sh.sent_by != $2
      ORDER BY sh.friendship_id, sh.sent_at DESC`,
     [me[0].id, me[0].name]
   );
-  res.json(rows.map(r => ({ friendshipId: r.friendship_id, sentAt: r.sent_at, sentBy: r.sent_by })));
+  res.json(rows.map(r => ({
+    friendshipId: r.friendship_id, sentAt: r.sent_at, sentBy: r.sent_by,
+    unread: !r.last_read_at || new Date(r.sent_at) > new Date(r.last_read_at),
+  })));
+});
+
+// Mark a swap as read for the current user, and tell their other tabs/devices
+app.post('/api/friends/:id/read', requireAuth, async (req, res) => {
+  const name = req.session.user.name;
+  if (!(await isFriendshipMember(name, req.params.id))) return res.status(403).json({ error: 'Forbidden' });
+  const friendshipId = Number(req.params.id);
+  await pool.query(
+    `INSERT INTO friendship_reads (user_id, friendship_id, last_read_at)
+     SELECT id, $2, NOW() FROM users WHERE name = $1
+     ON CONFLICT (user_id, friendship_id)
+     DO UPDATE SET last_read_at = GREATEST(friendship_reads.last_read_at, EXCLUDED.last_read_at)`,
+    [name, friendshipId]
+  );
+  io.to(`user-${name}`).emit('swap-read', { friendshipId });
+  res.json({ success: true });
 });
 
 app.get('/api/friends/:id/history', requireAuth, async (req, res) => {

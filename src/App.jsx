@@ -360,6 +360,7 @@ function App() {
 
   // Unread tracking
   const [unreadFriendships, setUnreadFriendships] = useState(new Set());
+  const unreadRef = useRef(unreadFriendships);
   const userRef = useRef(null);
 
   const loadMe = async () => {
@@ -393,40 +394,36 @@ function App() {
     if (s.ok) setSentRequests(await s.json());
   };
 
-  // Record that this friendship's swap has been seen. Uses the newest known
-  // song time when it's ahead of this device's clock, so clock skew can't make
-  // an already-seen song count as unread again on the next load.
-  const markRead = (friendshipId, latestSentAt) => {
-    setUnreadFriendships(prev => {
-      if (!prev.has(friendshipId)) return prev;
-      const next = new Set(prev); next.delete(friendshipId); return next;
-    });
-    const name = userRef.current?.name;
-    if (!name) return;
-    const key = `ss_last_viewed_${name}`;
-    try {
-      const lv = JSON.parse(localStorage.getItem(key) || '{}');
-      const now = Date.now();
-      const latest = latestSentAt ? new Date(latestSentAt).getTime() : 0;
-      lv[friendshipId] = new Date(Math.max(now, latest, lv[friendshipId] ? new Date(lv[friendshipId]).getTime() : 0)).toISOString();
-      localStorage.setItem(key, JSON.stringify(lv));
-    } catch { /* storage unavailable — the in-memory state is still cleared */ }
+  const removeUnread = (friendshipId) => setUnreadFriendships(prev => {
+    if (!prev.has(friendshipId)) return prev;
+    const next = new Set(prev); next.delete(friendshipId); return next;
+  });
+
+  // Record on the server that this swap has been seen. The server tells this
+  // account's other tabs/devices so their badges clear too.
+  const markRead = (friendshipId) => {
+    removeUnread(friendshipId);
+    fetch(`/api/friends/${friendshipId}/read`, { method: 'POST', credentials: 'include' }).catch(() => {});
   };
 
   const loadUnreadStatus = async (currentUser) => {
     const r = await fetch('/api/friends/latest-activity', { credentials: 'include' });
     if (!r.ok) return;
     const activities = await r.json();
-    const key = `ss_last_viewed_${currentUser.name}`;
-    let lastViewed = {};
-    try { lastViewed = JSON.parse(localStorage.getItem(key) || '{}'); } catch { /* ignore */ }
+    // One-time carry-over from when read status lived in this browser
+    const legacyKey = `ss_last_viewed_${currentUser.name}`;
+    let legacy = {};
+    try { legacy = JSON.parse(localStorage.getItem(legacyKey) || '{}'); } catch { /* ignore */ }
     const unread = new Set();
-    for (const { friendshipId, sentAt } of activities) {
+    for (const { friendshipId, sentAt, unread: isUnread } of activities) {
+      if (!isUnread) continue;
+      const active = friendshipId === activeFriendshipRef.current?.friendship_id;
+      const seenHere = legacy[friendshipId] && new Date(legacy[friendshipId]) >= new Date(sentAt);
       // The swap that's open right now is being looked at, so it's read
-      if (friendshipId === activeFriendshipRef.current?.friendship_id) continue;
-      const lv = lastViewed[friendshipId];
-      if (!lv || new Date(sentAt) > new Date(lv)) unread.add(friendshipId);
+      if (active || seenHere) markRead(friendshipId);
+      else unread.add(friendshipId);
     }
+    try { localStorage.removeItem(legacyKey); } catch { /* ignore */ }
     setUnreadFriendships(unread);
   };
 
@@ -434,6 +431,7 @@ function App() {
 
   // Unread count in the tab title, plus a red pip on the favicon
   useEffect(() => {
+    unreadRef.current = unreadFriendships;
     const count = unreadFriendships.size;
     document.title = count > 0 ? `(${count}) ${BASE_TITLE}` : BASE_TITLE;
     setFaviconPip(count > 0);
@@ -444,10 +442,14 @@ function App() {
   useEffect(() => {
     const onVisible = () => {
       const active = activeFriendshipRef.current;
-      if (document.visibilityState === 'visible' && active) markRead(active.friendship_id);
+      if (document.visibilityState === 'visible' && active && unreadRef.current.has(active.friendship_id)) {
+        markRead(active.friendship_id);
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
+    // markRead only uses state setters, refs and fetch, so a stale copy is fine
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Escape closes the Settings page
@@ -487,12 +489,13 @@ function App() {
     socket.on('song-received', (song) => {
       if (song.friendshipId === activeFriendshipRef.current?.friendship_id) setReceivedSong(song);
     });
-    socket.on('swap-received', ({ friendshipId, sentAt }) => {
+    socket.on('swap-received', ({ friendshipId }) => {
       const viewing = friendshipId === activeFriendshipRef.current?.friendship_id
         && document.visibilityState === 'visible';
-      if (viewing) markRead(friendshipId, sentAt);
+      if (viewing) markRead(friendshipId);
       else setUnreadFriendships(prev => prev.has(friendshipId) ? prev : new Set(prev).add(friendshipId));
     });
+    socket.on('swap-read', ({ friendshipId }) => removeUnread(friendshipId));
     socket.on('song-cleared', () => setReceivedSong(null));
     socket.on('song-rated', applyRating);
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
@@ -505,7 +508,11 @@ function App() {
         if (entry.sentBy === userRef.current?.name) {
           setSongDetails(prev => (prev && !prev.id && prev.title === entry.title ? { ...prev, id: entry.id, rating: null } : prev));
         }
-        markRead(entry.friendshipId, entry.sentAt);
+        // Unread handling for incoming songs is done by swap-received, which
+        // knows whether the tab is hidden; only mark read if it's being looked at
+        if (entry.sentBy !== userRef.current?.name && document.visibilityState === 'visible') {
+          markRead(entry.friendshipId);
+        }
       } else if (entry.sentBy !== userRef.current?.name) {
         setUnreadFriendships(prev => new Set([...prev, entry.friendshipId]));
       }
@@ -518,6 +525,7 @@ function App() {
     return () => {
       socket.off('song-received');
       socket.off('swap-received');
+      socket.off('swap-read');
       socket.off('song-cleared');
       socket.off('song-rated');
       socket.off('all-songs-cleared');
@@ -557,7 +565,6 @@ function App() {
     if (histRes.ok) {
       const hist = await histRes.json();
       setHistory(hist);
-      markRead(friendship.friendship_id, hist[0]?.sentAt);
     }
     if (curRes.ok) {
       const song = await curRes.json();
