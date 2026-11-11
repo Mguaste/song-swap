@@ -330,10 +330,31 @@ const readPendingInvite = () => {
 };
 const clearPendingInvite = () => { try { sessionStorage.removeItem(INVITE_KEY); } catch { /* ignore */ } };
 
+// /share?url=…&text=… — sent by Android's share menu (installed app) or an
+// iPhone Shortcut. Keep the first link found (survives log-in), clean the URL,
+// and fill it into the send box once a friend is picked.
+const SHARE_KEY = 'ss_pending_share';
+const readPendingShare = () => {
+  let link = null;
+  if (window.location.pathname.replace(/\/$/, '') === '/share') {
+    const q = new URLSearchParams(window.location.search);
+    const all = ['url', 'text', 'title'].map(k => q.get(k) || '').join(' ');
+    link = all.match(/https?:\/\/\S+/)?.[0] ?? null;
+    window.history.replaceState(null, '', '/');
+  }
+  try {
+    if (link) sessionStorage.setItem(SHARE_KEY, link);
+    return sessionStorage.getItem(SHARE_KEY);
+  } catch { return link; }
+};
+const clearPendingShare = () => { try { sessionStorage.removeItem(SHARE_KEY); } catch { /* ignore */ } };
+
 function App() {
   const [user, setUser] = useState(undefined);
   const [authMode, setAuthMode] = useState(() => (readPendingInvite() ? 'register' : 'login'));
   const [pendingInvite, setPendingInvite] = useState(readPendingInvite);
+  const [pendingShare, setPendingShare] = useState(readPendingShare);
+  const pendingShareRef = useRef(pendingShare);
   // Arriving logged out from an invite link goes straight to sign-up
   const [showAuth, setShowAuth] = useState(() => !!pendingInvite);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -479,6 +500,14 @@ function App() {
     loadFriends();
     loadRequests();
     loadUnreadStatus(user);
+    // Shared a song into the app: with one friend, open them straight away;
+    // otherwise show the friends list and fill it in once one is picked
+    if (pendingShareRef.current) {
+      loadFriends().then(list => {
+        if (list.length === 1) selectFriend(list[0]);
+        else setSidebarOpen(true);
+      });
+    }
     if (pendingInvite) {
       clearPendingInvite();
       setPendingInvite(null);
@@ -588,6 +617,14 @@ function App() {
     if (myRes.ok) {
       const mySong = await myRes.json();
       if (mySong) setSongDetails(mySong);
+    }
+    const shared = pendingShareRef.current;
+    if (shared) {
+      pendingShareRef.current = null;
+      setPendingShare(null);
+      clearPendingShare();
+      setSongLink(shared);
+      verifySong(shared);
     }
   };
 
@@ -1075,7 +1112,14 @@ function App() {
           ) : !activeFriendship ? (
             <div id="empty-state">
               <img src={icon} id="empty-logo" alt="icon" />
-              <p>Select a friend to start swapping songs</p>
+              {pendingShare ? (
+                <>
+                  <p id="share-pick">Pick a friend to send the song you shared</p>
+                  <button className="link-btn" onClick={() => { pendingShareRef.current = null; setPendingShare(null); clearPendingShare(); }}>Cancel</button>
+                </>
+              ) : (
+                <p>Select a friend to start swapping songs</p>
+              )}
             </div>
           ) : (
 

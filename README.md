@@ -50,12 +50,15 @@ https://ko-fi.com/mguaste
 * [x] Removed leftover Spotify tokens from the DB
 * [x] Easier to leave Settings (Back link, highlighted gear, Esc, picking a friend closes it)
 * [x] Unread count in the tab title + red favicon pip, updating live
+* [x] Read status stored on the server (syncs across devices), tabs auto-reload after a deploy
+* [x] Mobile layout: no sideways scrolling, Settings stacks on phones
+* [x] Installable app (Add to Home Screen) + `/share` link for sharing songs in
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.
 
 **Bring people back (biggest impact)**
-* [ ] Installable phone app (PWA) + share target, so you can share from Spotify's share menu straight into Song Swap (Android)
+* [x] Installable phone app (PWA) + share target, so you can share from Spotify's share menu straight into Song Swap (Android; iPhone via a Shortcut)
 * [ ] Push notifications when a friend sends you a song (builds on the PWA)
 * [ ] 30-second song previews in the app (Deezer + iTunes give free preview clips, no key needed)
 

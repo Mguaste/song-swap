@@ -4,7 +4,10 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh; /* excludes mobile browser toolbars */
 }
+
+#share-pick { color: #fff; font-weight: 500; text-align: center; }
 
 #app-body {
   display: flex;
