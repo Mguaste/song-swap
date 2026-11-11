@@ -131,6 +131,15 @@ const initDb = async () => {
   console.log('Database tables ready.');
 };
 
+// The built frontend's entry bundle (e.g. "/assets/index-CKELVFdc.js"). Its
+// name changes on every deploy, so it doubles as a version id.
+const BUILD_ID = (() => {
+  try {
+    const html = fs.readFileSync(path.join(__dirname, '../dist/index.html'), 'utf8');
+    return html.match(/\/assets\/index-[\w-]+\.js/)?.[0] ?? null;
+  } catch { return null; }
+})();
+
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -228,6 +237,8 @@ const isFriendshipMember = async (userName, friendshipId) => {
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
+  // Lets tabs running an older build notice a deploy and reload themselves
+  if (BUILD_ID) socket.emit('build-id', BUILD_ID);
 
   // Any client-supplied name is ignored; the room comes from the session
   socket.on('join-user', async () => {
@@ -668,8 +679,15 @@ app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
 
 const DIST = path.join(__dirname, '../dist');
 if (fs.existsSync(DIST)) {
-  app.use(express.static(DIST, { dotfiles: 'allow' }));
-  app.get('/{*path}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
+  // index.html must always be revalidated so a deploy is picked up on reload
+  const noCacheHtml = (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+  };
+  app.use(express.static(DIST, { dotfiles: 'allow', setHeaders: noCacheHtml }));
+  app.get('/{*path}', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(path.join(DIST, 'index.html'));
+  });
 }
 
 // ── Song lookup ──────────────────────────────────────────────────────────────
