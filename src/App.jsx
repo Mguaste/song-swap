@@ -360,7 +360,6 @@ function App() {
 
   // Unread tracking
   const [unreadFriendships, setUnreadFriendships] = useState(new Set());
-  const unreadRef = useRef(unreadFriendships);
   const userRef = useRef(null);
 
   const loadMe = async () => {
@@ -431,24 +430,22 @@ function App() {
 
   // Unread count in the tab title, plus a red pip on the favicon
   useEffect(() => {
-    unreadRef.current = unreadFriendships;
     const count = unreadFriendships.size;
     document.title = count > 0 ? `(${count}) ${BASE_TITLE}` : BASE_TITLE;
     setFaviconPip(count > 0);
   }, [unreadFriendships]);
 
-  // A swap from the open friend that arrived while the tab was hidden counts
-  // as unread until the tab is looked at again
+  // Coming back to the tab: re-sync unread status from the server. Phones pause
+  // background tabs and drop the socket, so live events (new swaps, reads on
+  // other devices) can be missed. This also marks the open swap as read, if a
+  // song arrived for it while the tab was hidden.
   useEffect(() => {
     const onVisible = () => {
-      const active = activeFriendshipRef.current;
-      if (document.visibilityState === 'visible' && active && unreadRef.current.has(active.friendship_id)) {
-        markRead(active.friendship_id);
-      }
+      if (document.visibilityState === 'visible' && userRef.current) loadUnreadStatus(userRef.current);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-    // markRead only uses state setters, refs and fetch, so a stale copy is fine
+    // loadUnreadStatus only uses state setters, refs and fetch, so a stale copy is fine
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -479,6 +476,8 @@ function App() {
     const joinRooms = () => {
       socket.emit('join-user');
       if (activeFriendshipRef.current) socket.emit('join-friendship', activeFriendshipRef.current.friendship_id);
+      // Catch up on anything sent while disconnected (server restart, phone sleep)
+      loadUnreadStatus(user);
     };
     socket.on('connect', joinRooms);
     socket.disconnect().connect();
