@@ -313,6 +313,24 @@ function Dashboard({ user, friends, friendCount, friendRequests, sentRequests, r
         </section>
       )}
 
+      {stats && (stats.sent + stats.received) > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">Your numbers</h2>
+          <div className="dash-stats">
+            <div className="dash-stat"><span className="dash-stat-num">{stats.sent + stats.received}</span><span className="dash-stat-label">songs swapped</span></div>
+            <div className="dash-stat"><span className="dash-stat-num">{stats.sent}</span><span className="dash-stat-label">sent</span></div>
+            <div className="dash-stat"><span className="dash-stat-num">{stats.received}</span><span className="dash-stat-label">received</span></div>
+            <div className="dash-stat">
+              <span className="dash-stat-num">{stats.avg_rating_received ? `${stats.avg_rating_received}★` : '—'}</span>
+              <span className="dash-stat-label">{stats.ratings_received ? `avg rating you got` : 'no ratings yet'}</span>
+            </div>
+            {stats.top_artist && (
+              <div className="dash-stat dash-stat-wide"><span className="dash-stat-num dash-stat-text">{stats.top_artist}</span><span className="dash-stat-label">most swapped artist</span></div>
+            )}
+          </div>
+        </section>
+      )}
+
       {unrated.length > 0 && (
         <section className="dash-section">
           <h2 className="dash-title">Rate what you got</h2>
@@ -340,24 +358,6 @@ function Dashboard({ user, friends, friendCount, friendRequests, sentRequests, r
           </div>
           <button id="dash-invite-btn" onClick={onInvite}>{inviteCopied ? '✓ Link copied' : 'Share invite link'}</button>
         </div>
-      )}
-
-      {stats && (stats.sent + stats.received) > 0 && (
-        <section className="dash-section">
-          <h2 className="dash-title">Your numbers</h2>
-          <div className="dash-stats">
-            <div className="dash-stat"><span className="dash-stat-num">{stats.sent + stats.received}</span><span className="dash-stat-label">songs swapped</span></div>
-            <div className="dash-stat"><span className="dash-stat-num">{stats.sent}</span><span className="dash-stat-label">sent</span></div>
-            <div className="dash-stat"><span className="dash-stat-num">{stats.received}</span><span className="dash-stat-label">received</span></div>
-            <div className="dash-stat">
-              <span className="dash-stat-num">{stats.avg_rating_received ? `${stats.avg_rating_received}★` : '—'}</span>
-              <span className="dash-stat-label">{stats.ratings_received ? `avg rating you got` : 'no ratings yet'}</span>
-            </div>
-            {stats.top_artist && (
-              <div className="dash-stat dash-stat-wide"><span className="dash-stat-num dash-stat-text">{stats.top_artist}</span><span className="dash-stat-label">most swapped artist</span></div>
-            )}
-          </div>
-        </section>
       )}
 
       {recent.length > 0 && (
