@@ -56,7 +56,7 @@ https://ko-fi.com/mguaste
 * [x] Friends list sorted by recent activity (reorders live)
 * [x] Open swap refreshes when you come back to the tab or reconnect (no reload needed after phone sleep)
 * [x] Delete account + admin password reset
-* [x] Home dashboard: new for you, your turn, requests, invite nudge, songs you loved (logo = Home; phones open on it)
+* [x] Home dashboard: greeting + daily progress ring + reset countdown, new for you, today with each friend, requests, rate what you got, invite nudge, your numbers, recent swaps, songs you loved (logo = Home; phones open on it)
 * [x] Fixes: logging out no longer passes the open swap to the next login; deploys no longer bring back old "current" songs
 * [x] Profile pictures (friends-only, resized to 256px) + change username (once every 7 days)
 

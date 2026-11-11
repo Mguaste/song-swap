@@ -159,11 +159,37 @@ const timeAgo = (iso) => {
   return days < 30 ? `${days}d ago` : new Date(iso).toLocaleDateString();
 };
 
-// Home screen when no swap is open: what's new, who you owe a song, requests,
-// an invite nudge, and songs you loved. Refetches whenever refreshKey changes.
-function Dashboard({ friends, friendCount, friendRequests, sentRequests, refreshKey, onOpenFriend, onOpenSong,
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+};
+
+const untilText = (iso) => {
+  const mins = Math.max(0, Math.round((new Date(iso) - Date.now()) / 60000));
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+};
+
+// Small ring showing how many friends you've sent a song to today
+function ProgressRing({ done, total }) {
+  const r = 20, c = 2 * Math.PI * r, frac = total ? done / total : 0;
+  return (
+    <svg className="dash-ring" viewBox="0 0 48 48" aria-label={`${done} of ${total} friends sent to today`}>
+      <circle cx="24" cy="24" r={r} className="dash-ring-track" />
+      <circle cx="24" cy="24" r={r} className="dash-ring-fill" strokeDasharray={c} strokeDashoffset={c * (1 - frac)} />
+      <text x="24" y="28" textAnchor="middle">{done}/{total}</text>
+    </svg>
+  );
+}
+
+const SmallArt = ({ song }) => (song?.albumArt ? <img src={song.albumArt} alt="" className="dash-art-sm" /> : <span className="dash-art-sm placeholder" />);
+
+// Home screen when no swap is open. Refetches whenever refreshKey changes.
+function Dashboard({ user, friends, friendCount, friendRequests, sentRequests, refreshKey, onOpenFriend, onOpenSong,
   onAccept, onDecline, onInvite, inviteCopied, pendingShare, onCancelShare }) {
   const [data, setData] = useState(null);
+  const [localTick, setLocalTick] = useState(0);
+  const [, setNow] = useState(0);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/dashboard', { credentials: 'include' })
@@ -171,15 +197,58 @@ function Dashboard({ friends, friendCount, friendRequests, sentRequests, refresh
       .then(d => { if (!cancelled && d) setData(d); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [refreshKey]);
+  }, [refreshKey, localTick]);
+  // Keep the countdown and "x ago" times fresh
+  useEffect(() => {
+    const id = setInterval(() => setNow(n => n + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const rate = async (song, rating) => {
+    setData(d => ({ ...d, unrated: d.unrated.map(s => (s.id === song.id ? { ...s, rating } : s)) }));
+    await fetch(`/api/songs/${song.id}/rating`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating }),
+    }).catch(() => {});
+    setTimeout(() => setLocalTick(t => t + 1), 900); // let the stars show, then refresh lists
+  };
+
+  const friendOf = (friendshipId) => friends.find(x => x.friendship_id === friendshipId);
+  const friendAvatar = (friendshipId, name) => {
+    const fr = friendOf(friendshipId);
+    return <Avatar userId={fr?.friend_id} avatarAt={fr?.friend_avatar_at} name={name} />;
+  };
 
   const newForYou = data?.newForYou ?? [];
-  const yourTurn = data?.yourTurn ?? [];
+  const today = data?.today ?? [];
+  // Songs already under "New for you" get rated after opening; don't list them twice
+  const unrated = (data?.unrated ?? []).filter(s => !newForYou.some(n => n.id === s.id));
+  const recent = data?.recent ?? [];
   const loved = data?.loved ?? [];
-  const nothingYet = data && !newForYou.length && !yourTurn.length && !friendRequests.length;
+  const stats = data?.stats;
+  const sentToday = today.filter(t => t.mine).length;
+  // Friends you still owe a song first
+  const todaySorted = [...today].sort((a, b) => (!!a.mine - !!b.mine) || (!!b.theirs - !!a.theirs));
 
   return (
     <div id="dashboard">
+      <header className="dash-hero">
+        <Avatar userId={user.id} avatarAt={user.avatar_at} name={user.name} className="avatar-lg" />
+        <div className="dash-hero-text">
+          <h2 className="dash-greeting">{greeting()}, {user.name}</h2>
+          {today.length > 0 && (
+            <p className="dash-hero-sub">
+              {sentToday === today.length
+                ? "You've sent everyone a song today 🎉"
+                : `You've sent to ${sentToday} of ${today.length} friend${today.length > 1 ? 's' : ''} today`}
+            </p>
+          )}
+          {data?.resetAt && <p className="dash-hero-reset">New day of swaps in {untilText(data.resetAt)}</p>}
+        </div>
+        {today.length > 0 && <ProgressRing done={sentToday} total={today.length} />}
+      </header>
+
       {pendingShare && (
         <div className="dash-card dash-share">
           <p>Pick a friend to send the song you shared</p>
@@ -204,17 +273,22 @@ function Dashboard({ friends, friendCount, friendRequests, sentRequests, refresh
         </section>
       )}
 
-      {yourTurn.length > 0 && (
+      {today.length > 0 && (
         <section className="dash-section">
-          <h2 className="dash-title">Your turn <span className="dash-hint">· no song sent today</span></h2>
-          <div className="dash-chips">
-            {yourTurn.map(f => (
-              <button key={f.friendshipId} className="dash-chip" onClick={() => onOpenFriend(f.friendshipId)}>
-                {(() => {
-                  const fr = friends.find(x => x.friendship_id === f.friendshipId);
-                  return <Avatar userId={fr?.friend_id} avatarAt={fr?.friend_avatar_at} name={f.friendName} />;
-                })()}
-                {f.friendName}
+          <h2 className="dash-title">Today</h2>
+          <div className="dash-card dash-today">
+            {todaySorted.map(t => (
+              <button key={t.friendshipId} className="dash-today-row" onClick={() => onOpenFriend(t.friendshipId)}>
+                {friendAvatar(t.friendshipId, t.friendName)}
+                <span className="dash-today-name">{t.friendName}</span>
+                <span className="dash-today-side" title={t.mine ? `You sent ${t.mine.title}` : ''}>
+                  <span className="dash-today-label">You</span>
+                  {t.mine ? <SmallArt song={t.mine} /> : <span className="dash-send-pill">Send</span>}
+                </span>
+                <span className="dash-today-side" title={t.theirs ? `They sent ${t.theirs.title}` : ''}>
+                  <span className="dash-today-label">Them</span>
+                  {t.theirs ? <SmallArt song={t.theirs} /> : <span className="dash-today-none">—</span>}
+                </span>
               </button>
             ))}
           </div>
@@ -239,6 +313,25 @@ function Dashboard({ friends, friendCount, friendRequests, sentRequests, refresh
         </section>
       )}
 
+      {unrated.length > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">Rate what you got</h2>
+          {unrated.map(s => (
+            <div key={s.id} className="dash-card dash-rate">
+              <button className="dash-rate-song" onClick={() => onOpenSong(s)} title="Open in your music app">
+                {s.albumArt ? <img src={s.albumArt} alt="" className="dash-art" /> : <div className="dash-art placeholder" />}
+                <span className="dash-song-text">
+                  <span className="dash-song-title">{s.title}</span>
+                  <span className="dash-song-sub">{s.artist}</span>
+                  <span className="dash-song-meta">from {s.friendName} · {timeAgo(s.sentAt)}</span>
+                </span>
+              </button>
+              <StarRating value={s.rating} onRate={n => rate(s, n)} />
+            </div>
+          ))}
+        </section>
+      )}
+
       {friendCount < 3 && (
         <div className="dash-card dash-invite">
           <div>
@@ -249,7 +342,44 @@ function Dashboard({ friends, friendCount, friendRequests, sentRequests, refresh
         </div>
       )}
 
-      {nothingYet && <p className="dash-empty">You're all caught up — nothing new right now.</p>}
+      {stats && (stats.sent + stats.received) > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">Your numbers</h2>
+          <div className="dash-stats">
+            <div className="dash-stat"><span className="dash-stat-num">{stats.sent + stats.received}</span><span className="dash-stat-label">songs swapped</span></div>
+            <div className="dash-stat"><span className="dash-stat-num">{stats.sent}</span><span className="dash-stat-label">sent</span></div>
+            <div className="dash-stat"><span className="dash-stat-num">{stats.received}</span><span className="dash-stat-label">received</span></div>
+            <div className="dash-stat">
+              <span className="dash-stat-num">{stats.avg_rating_received ? `${stats.avg_rating_received}★` : '—'}</span>
+              <span className="dash-stat-label">{stats.ratings_received ? `avg rating you got` : 'no ratings yet'}</span>
+            </div>
+            {stats.top_artist && (
+              <div className="dash-stat dash-stat-wide"><span className="dash-stat-num dash-stat-text">{stats.top_artist}</span><span className="dash-stat-label">most swapped artist</span></div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {recent.length > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">Recent swaps</h2>
+          <div className="dash-card dash-recent">
+            {recent.map(s => {
+              const mineSong = s.sentBy === user.name;
+              return (
+                <button key={s.id} className="dash-recent-row" onClick={() => onOpenFriend(s.friendshipId)}>
+                  <SmallArt song={s} />
+                  <span className="dash-song-text">
+                    <span className="dash-song-title">{s.title}</span>
+                    <span className="dash-song-meta-muted">{mineSong ? `You → ${s.friendName}` : `${s.friendName} → you`} · {timeAgo(s.sentAt)}</span>
+                  </span>
+                  {s.rating ? <span className="dash-recent-rating">{'★'.repeat(s.rating)}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {loved.length > 0 && (
         <section className="dash-section">
@@ -1493,6 +1623,7 @@ function App() {
             </div>
           ) : !activeFriendship ? (
             <Dashboard
+              user={user}
               friends={friends}
               friendCount={friends.length}
               friendRequests={friendRequests}

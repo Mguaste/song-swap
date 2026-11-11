@@ -805,7 +805,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   const mine = `SELECT f.id, CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name
     FROM friendships f JOIN users u1 ON u1.id = f.requester_id JOIN users u2 ON u2.id = f.receiver_id
     WHERE (f.requester_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'`;
-  const [newForYou, yourTurn, loved] = await Promise.all([
+  // Start of today / tomorrow in the reset timezone, matching the midnight clear
+  const TODAY = `(date_trunc('day', NOW() AT TIME ZONE $3) AT TIME ZONE $3)`;
+  const [newForYou, today, unrated, recent, loved, stats, resetAt] = await Promise.all([
     // Latest song from each friend that you haven't looked at yet
     pool.query(
       `WITH mine AS (${mine})
@@ -820,17 +822,35 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
        ORDER BY sent_at DESC`,
       [uid, name]
     ),
-    // Friends you haven't sent a song to since today's reset
+    // Today's latest song each way, per friend
+    pool.query(
+      `WITH mine AS (${mine}),
+       todays AS (
+         SELECT DISTINCT ON (sh.friendship_id, sh.sent_by = $2) sh.*, (sh.sent_by = $2) AS from_me
+         FROM song_history sh JOIN mine m ON m.id = sh.friendship_id
+         WHERE sh.sent_at >= ${TODAY}
+         ORDER BY sh.friendship_id, sh.sent_by = $2, sh.sent_at DESC
+       )
+       SELECT m.id AS friendship_id, m.friend_name,
+         (SELECT row_to_json(t) FROM todays t WHERE t.friendship_id = m.id AND t.from_me) AS mine,
+         (SELECT row_to_json(t) FROM todays t WHERE t.friendship_id = m.id AND NOT t.from_me) AS theirs
+       FROM mine m ORDER BY m.friend_name`,
+      [uid, name, RESET_TIMEZONE]
+    ),
+    // Songs sent to you that you haven't rated yet
     pool.query(
       `WITH mine AS (${mine})
-       SELECT m.id AS friendship_id, m.friend_name FROM mine m
-       WHERE NOT EXISTS (
-         SELECT 1 FROM song_history sh
-         WHERE sh.friendship_id = m.id AND sh.sent_by = $2
-           AND sh.sent_at >= (date_trunc('day', NOW() AT TIME ZONE $3) AT TIME ZONE $3)
-       )
-       ORDER BY m.friend_name`,
-      [uid, name, RESET_TIMEZONE]
+       SELECT sh.*, m.friend_name FROM song_history sh JOIN mine m ON m.id = sh.friendship_id
+       WHERE sh.sent_by != $2 AND sh.rating IS NULL
+       ORDER BY sh.sent_at DESC LIMIT 5`,
+      [uid, name]
+    ),
+    // Latest swaps both ways, across all friends
+    pool.query(
+      `WITH mine AS (${mine})
+       SELECT sh.*, m.friend_name FROM song_history sh JOIN mine m ON m.id = sh.friendship_id
+       ORDER BY sh.sent_at DESC LIMIT 8`,
+      [uid]
     ),
     // Songs friends sent you that you rated 4 or 5 stars
     pool.query(
@@ -840,12 +860,33 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
        ORDER BY COALESCE(sh.rated_at, sh.sent_at) DESC LIMIT 24`,
       [uid, name]
     ),
+    // Totals, average rating your songs got, most-swapped artist
+    pool.query(
+      `WITH mine AS (${mine}),
+       songs AS (SELECT sh.* FROM song_history sh JOIN mine m ON m.id = sh.friendship_id)
+       SELECT
+         (SELECT COUNT(*) FROM songs WHERE sent_by = $2)::int AS sent,
+         (SELECT COUNT(*) FROM songs WHERE sent_by != $2)::int AS received,
+         (SELECT ROUND(AVG(rating)::numeric, 1) FROM songs WHERE sent_by = $2 AND rating IS NOT NULL)::float AS avg_rating_received,
+         (SELECT COUNT(*) FROM songs WHERE sent_by = $2 AND rating IS NOT NULL)::int AS ratings_received,
+         (SELECT artist FROM songs WHERE COALESCE(artist, '') != ''
+            GROUP BY LOWER(artist), artist ORDER BY COUNT(*) DESC, MAX(sent_at) DESC LIMIT 1) AS top_artist`,
+      [uid, name]
+    ),
+    pool.query(`SELECT ((date_trunc('day', NOW() AT TIME ZONE $1) + INTERVAL '1 day') AT TIME ZONE $1) AS at`, [RESET_TIMEZONE]),
   ]);
   const withFriend = r => ({ ...rowToEntry(r), friendName: r.friend_name });
   res.json({
     newForYou: newForYou.rows.map(withFriend),
-    yourTurn: yourTurn.rows.map(r => ({ friendshipId: r.friendship_id, friendName: r.friend_name })),
+    today: today.rows.map(r => ({
+      friendshipId: r.friendship_id, friendName: r.friend_name,
+      mine: r.mine ? rowToEntry(r.mine) : null, theirs: r.theirs ? rowToEntry(r.theirs) : null,
+    })),
+    unrated: unrated.rows.map(withFriend),
+    recent: recent.rows.map(withFriend),
     loved: loved.rows.map(withFriend),
+    stats: stats.rows[0],
+    resetAt: resetAt.rows[0].at,
   });
 });
 
