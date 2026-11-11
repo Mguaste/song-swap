@@ -31,3 +31,11 @@ export const readPendingShare = () => {
   } catch { return link; }
 };
 export const clearPendingShare = () => { try { sessionStorage.removeItem(SHARE_KEY); } catch { /* ignore */ } };
+
+// /?swap=123 — opened from a push notification: show that swap once logged in
+export const readPendingSwap = () => {
+  const q = new URLSearchParams(window.location.search);
+  const id = Number(q.get('swap'));
+  if (q.has('swap')) window.history.replaceState(null, '', '/');
+  return Number.isInteger(id) && id > 0 ? id : null;
+};

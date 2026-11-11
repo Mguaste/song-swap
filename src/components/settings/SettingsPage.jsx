@@ -2,6 +2,7 @@ import { ProfileSettings } from './ProfileSettings';
 import { ChangePassword } from './ChangePassword';
 import { DeleteAccount } from './DeleteAccount';
 import { AdminResetPassword } from './AdminResetPassword';
+import { NotificationSettings } from './NotificationSettings';
 
 const PLATFORMS = [
   ['spotify', 'Spotify'], ['appleMusic', 'Apple Music'], ['youtubeMusic', 'YouTube Music'],
@@ -31,6 +32,14 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
           <select className="platform-select" value={preferredPlatform} onChange={e => onPlatformChange(e.target.value)}>
             {PLATFORMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h2 className="settings-section-title">Notifications</h2>
+        <div className="settings-row">
+          <label className="settings-label">This Device</label>
+          <NotificationSettings />
         </div>
       </div>
 

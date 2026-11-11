@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Avatar } from './Avatar';
 import { StarRating } from './StarRating';
 import { timeAgo, greeting, untilText } from '../lib/format';
+import { NotifyPrompt } from './NotifyPrompt';
 
 // Small ring showing how many friends you've sent a song to today
 function ProgressRing({ done, total }) {
@@ -81,6 +82,8 @@ export function Dashboard({ user, friends, friendCount, friendRequests, sentRequ
         </div>
         {today.length > 0 && <ProgressRing done={sentToday} total={today.length} />}
       </header>
+
+      <NotifyPrompt />
 
       {pendingShare && (
         <div className="dash-card dash-share">

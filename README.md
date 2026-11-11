@@ -7,6 +7,7 @@ https://ko-fi.com/mguaste
 ### Local development
 1. Install and start Postgres, then create a database: `createdb songswap`
 2. `cp .env.example .env` and set `SESSION_SECRET` (e.g. `openssl rand -hex 32`)
+   - Optional, for push notifications: `npx web-push generate-vapid-keys` and set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`
 3. `npm install`, then `npm run dev` from the repo root (frontend on http://localhost:5173)
 4. Register an account in the app. Tables are created on first start; SSL is off for localhost databases.
 
@@ -66,7 +67,7 @@ Data check (Nov 2026): 21 users but only 3 friendships, so the most important wo
 
 **Bring people back (biggest impact)**
 * [x] Installable phone app (PWA) + share target, so you can share from Spotify's share menu straight into Song Swap (Android; iPhone via a Shortcut)
-* [ ] Push notifications when a friend sends you a song (builds on the PWA)
+* [x] Push notifications when a friend sends you a song (builds on the PWA) — also friend requests; iPhone needs the Home Screen app
 * [ ] 30-second song previews in the app (Deezer + iTunes give free preview clips, no key needed)
 
 **Social**

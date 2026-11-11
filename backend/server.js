@@ -8,6 +8,7 @@ const PgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const crypto = require('crypto');
+const webpush = require('web-push');
 const path = require('path');
 const { Pool } = require('pg');
 require('dotenv').config();
@@ -95,6 +96,17 @@ const initDb = async () => {
     )
   `);
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS name_changed_at TIMESTAMPTZ');
+  // Web push: one row per device that turned notifications on
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
   // When each user last looked at each swap, so unread status follows the
   // account across devices instead of living in one browser's localStorage
   await pool.query(`
@@ -251,6 +263,10 @@ io.on('connection', (socket) => {
   // Lets tabs running an older build notice a deploy and reload themselves
   if (BUILD_ID) socket.emit('build-id', BUILD_ID);
 
+  // Whether this tab is on screen; push notifications are skipped while it is
+  socket.data.visible = false;
+  socket.on('visibility', (visible) => { socket.data.visible = !!visible; });
+
   // Any client-supplied name is ignored; the room comes from the session
   socket.on('join-user', async () => {
     try {
@@ -316,6 +332,12 @@ io.on('connection', (socket) => {
       );
       for (const { name } of other) {
         io.to(`user-${name}`).emit('swap-received', { friendshipId, sentAt: entry.sentAt });
+        sendPush(name, {
+          title: `${sentBy} sent you a song`,
+          body: [entry.title, entry.artist].filter(Boolean).join(' — '),
+          url: `/?swap=${friendshipId}`,
+          tag: `swap-${friendshipId}`,
+        });
       }
       io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
     } catch (err) {
@@ -432,6 +454,8 @@ app.patch('/api/me/password', requireAuth, async (req, res) => {
 // tabs to go back to the login screen
 const signOutEverywhere = async (name, db = pool) => {
   await db.query("DELETE FROM user_sessions WHERE sess->'user'->>'name' = $1", [name]);
+  // Signed-out devices shouldn't keep getting this account's notifications
+  await db.query('DELETE FROM push_subscriptions WHERE user_id = (SELECT id FROM users WHERE name = $1)', [name]);
 };
 const kickSockets = (name) => {
   io.to(`user-${name}`).emit('force-logout');
@@ -624,6 +648,77 @@ app.patch('/api/me/name', requireAuth, async (req, res) => {
   res.json({ name: newName });
 });
 
+// ── Push notifications ──
+// Keys come from Railway variables (generate with: npx web-push generate-vapid-keys).
+// Without them, push is simply off.
+const PUSH_ENABLED = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+if (PUSH_ENABLED) {
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://song-swap.app', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+}
+
+// Notify every device of a user, unless they have Song Swap open on screen
+// right now (it updates live, so a notification would be a double alert)
+const sendPush = async (name, payload) => {
+  if (!PUSH_ENABLED) return;
+  try {
+    const sockets = await io.in(`user-${name}`).fetchSockets();
+    if (sockets.some(s => s.data.visible)) return;
+    const { rows } = await pool.query(
+      `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth FROM push_subscriptions ps
+       JOIN users u ON u.id = ps.user_id WHERE u.name = $1`,
+      [name]
+    );
+    await Promise.all(rows.map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          JSON.stringify(payload),
+          { TTL: 60 * 60 * 24 }
+        );
+      } catch (err) {
+        // Gone/expired subscription (app uninstalled, browser data cleared)
+        if (err.statusCode === 404 || err.statusCode === 410) {
+          await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [sub.id]);
+        } else {
+          console.error('push failed:', err.statusCode || err.message);
+        }
+      }
+    }));
+  } catch (err) {
+    console.error('sendPush failed:', err);
+  }
+};
+
+app.get('/api/push/key', (req, res) => {
+  res.json({ publicKey: PUSH_ENABLED ? process.env.VAPID_PUBLIC_KEY : null });
+});
+
+app.post('/api/push/subscribe', requireAuth, async (req, res) => {
+  const sub = req.body?.subscription;
+  const endpoint = sub?.endpoint, p256dh = sub?.keys?.p256dh, auth = sub?.keys?.auth;
+  if (typeof endpoint !== 'string' || !/^https:\/\//.test(endpoint) || endpoint.length > 2000 || !p256dh || !auth) {
+    return res.status(400).json({ error: 'Invalid subscription' });
+  }
+  // A device belongs to whoever subscribed last on it
+  await pool.query(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+     SELECT id, $2, $3, $4 FROM users WHERE name = $1
+     ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth`,
+    [req.session.user.name, endpoint, String(p256dh), String(auth)]
+  );
+  res.json({ success: true });
+});
+
+app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (typeof endpoint !== 'string') return res.status(400).json({ error: 'Missing endpoint' });
+  await pool.query(
+    'DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = (SELECT id FROM users WHERE name = $2)',
+    [endpoint, req.session.user.name]
+  );
+  res.json({ success: true });
+});
+
 app.post('/api/logout', (req, res) => {
   req.session.destroy();
   res.json({ success: true });
@@ -651,6 +746,12 @@ app.post('/api/friends/add', requireAuth, async (req, res) => {
 
   await pool.query('INSERT INTO friendships (requester_id, receiver_id) VALUES ($1, $2)', [myId, theirId]);
   io.to(`user-${target[0].name}`).emit('friend-request-received');
+  sendPush(target[0].name, {
+    title: 'New friend request',
+    body: `${req.session.user.name} wants to swap songs with you`,
+    url: '/',
+    tag: 'friend-request',
+  });
   res.status(201).json({ message: `Friend request sent to ${target[0].name}` });
 });
 
@@ -1038,7 +1139,8 @@ const DIST = path.join(__dirname, '../dist');
 if (fs.existsSync(DIST)) {
   // index.html must always be revalidated so a deploy is picked up on reload
   const noCacheHtml = (res, filePath) => {
-    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+    // sw.js too, so service worker updates are picked up promptly
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
   };
   app.use(express.static(DIST, { dotfiles: 'allow', setHeaders: noCacheHtml }));
   app.get('/{*path}', (req, res) => {

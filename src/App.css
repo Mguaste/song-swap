@@ -2087,3 +2087,7 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 .match-line { margin: 4px 0 0; font-size: 0.84rem; color: #b3b3b3; }
 .match-line strong { color: #10B981; font-weight: 700; }
 .match-line.pending { color: #666; font-size: 0.8rem; }
+
+.dash-notify { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border-color: #10B98155; }
+.dash-notify-actions { display: flex; align-items: center; gap: 14px; }
+.notif-msg { font-size: 0.82rem; color: #b3b3b3; }

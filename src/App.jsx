@@ -2,7 +2,8 @@ import './App.css';
 import { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
-import { readPendingInvite, clearPendingInvite, readPendingShare, clearPendingShare } from './lib/pending';
+import { readPendingInvite, clearPendingInvite, readPendingShare, clearPendingShare, readPendingSwap } from './lib/pending';
+import { registerServiceWorker, disablePush } from './lib/push';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -19,6 +20,8 @@ function App() {
   const [pendingShare, setPendingShare] = useState(readPendingShare);
   const pendingShareRef = useRef(pendingShare);
   const clearSessionRef = useRef(() => {});
+  const pendingSwapRef = useRef(readPendingSwap()); // from a notification tap
+  const openSwapRef = useRef(() => {});
   const refreshActiveSwapRef = useRef(() => {});
   const songLinkRef = useRef('');
   // Arriving logged out from an invite link goes straight to sign-up
@@ -412,7 +415,17 @@ function App() {
     setUnreadFriendships(new Set());
   };
   useEffect(() => { clearSessionRef.current = clearSession; });
-  const logout = () => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(clearSession);
+  // Stop this device's notifications first, while the session still exists
+  const logout = () => disablePush()
+    .finally(() => fetch('/api/logout', { method: 'POST', credentials: 'include' }))
+    .then(clearSession);
+
+  // Open a swap by id (notification tap while the app is already open)
+  const openSwapById = (friendshipId) => {
+    const f = friends.find(x => x.friendship_id === friendshipId);
+    if (f) selectFriend(f);
+    else { pendingSwapRef.current = friendshipId; loadFriends().then(list => { const g = list.find(x => x.friendship_id === friendshipId); if (g) { pendingSwapRef.current = null; selectFriend(g); } }); }
+  };
 
   // Typing in the send box: drop any lookup in flight for the old text
   const handleLinkChange = (value) => {
@@ -450,6 +463,20 @@ function App() {
 
   // ── Effects (after the functions they use) ──
 
+  // Service worker (for push notifications) + taps on notifications while open
+  useEffect(() => {
+    registerServiceWorker();
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e) => {
+      if (e.data?.type !== 'open-url') return;
+      const id = Number(new URLSearchParams(e.data.url.split('?')[1] || '').get('swap'));
+      if (id) openSwapRef.current(id);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, []);
+  useEffect(() => { openSwapRef.current = openSwapById; });
+
   // Load the logged-in user once on start
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadMe(); }, []);
@@ -467,6 +494,8 @@ function App() {
   // song arrived for it while the tab was hidden.
   useEffect(() => {
     const onVisible = () => {
+      // The server skips push notifications while a tab is on screen
+      socket.emit('visibility', document.visibilityState === 'visible');
       if (document.visibilityState !== 'visible' || !userRef.current) return;
       loadUnreadStatus(userRef.current);
       refreshActiveSwapRef.current();
@@ -497,7 +526,14 @@ function App() {
     loadUnreadStatus(user);
     // Shared a song into the app: with one friend, open them straight away;
     // otherwise show the friends list and fill it in once one is picked
-    if (pendingShareRef.current) {
+    if (pendingSwapRef.current) {
+      const id = pendingSwapRef.current;
+      pendingSwapRef.current = null;
+      loadFriends().then(list => {
+        const f = list.find(x => x.friendship_id === id);
+        if (f) selectFriend(f);
+      });
+    } else if (pendingShareRef.current) {
       loadFriends().then(list => {
         if (list.length === 1) selectFriend(list[0]);
         else setSidebarOpen(true);
@@ -515,6 +551,7 @@ function App() {
     // send the session cookie. Rooms are rejoined on every (re)connect.
     const joinRooms = () => {
       socket.emit('join-user');
+      socket.emit('visibility', document.visibilityState === 'visible');
       if (activeFriendshipRef.current) socket.emit('join-friendship', activeFriendshipRef.current.friendship_id);
       // Catch up on anything sent while disconnected (server restart, phone sleep)
       loadUnreadStatus(user);
