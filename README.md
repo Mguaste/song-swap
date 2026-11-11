@@ -78,8 +78,8 @@ Data check (Nov 2026): 21 users but only 3 friendships, so the most important wo
 * [ ] Read pasted Amazon Music links (if their pages are readable)
 
 **Account / trust**
-* [ ] Delete account (matches the privacy page)
-* [ ] Password reset (admin reset button or recovery code, since there's no email on file)
+* [x] Delete account (matches the privacy page)
+* [x] Password reset (admin reset button or recovery code, since there's no email on file) — admin button done
 
 **Infra / safety net**
 * [ ] Turn on Railway Postgres backups

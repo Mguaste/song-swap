@@ -7,6 +7,7 @@ const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
 const { Pool } = require('pg');
 require('dotenv').config();
@@ -413,6 +414,83 @@ app.patch('/api/me/password', requireAuth, async (req, res) => {
   const newHash = await bcrypt.hash(newPassword, 10);
   await pool.query('UPDATE users SET password_hash = $1 WHERE name = $2', [newHash, req.session.user.name]);
   res.json({ success: true });
+});
+
+// Sign a user out everywhere: drop their stored sessions and tell any open
+// tabs to go back to the login screen
+const signOutEverywhere = async (name, db = pool) => {
+  await db.query("DELETE FROM user_sessions WHERE sess->'user'->>'name' = $1", [name]);
+};
+const kickSockets = (name) => {
+  io.to(`user-${name}`).emit('force-logout');
+  io.in(`user-${name}`).disconnectSockets(true);
+};
+
+// Delete your own account: friendships (incl. pending requests), their swap
+// history, read markers and sessions. Needs the current password.
+app.delete('/api/me', requireAuth, authLimiter, async (req, res) => {
+  const name = req.session.user.name;
+  const { password } = req.body ?? {};
+  if (!password) return res.status(400).json({ error: 'Enter your password to confirm' });
+  const { rows: me } = await pool.query('SELECT id, password_hash, is_admin FROM users WHERE name = $1', [name]);
+  if (me.length === 0) return res.status(404).json({ error: 'Account not found' });
+  if (!(await bcrypt.compare(password, me[0].password_hash))) return res.status(401).json({ error: 'Password is incorrect' });
+  if (me[0].is_admin) {
+    const { rows } = await pool.query('SELECT COUNT(*) FROM users WHERE is_admin AND id != $1', [me[0].id]);
+    if (Number(rows[0].count) === 0) return res.status(400).json({ error: "You're the only admin — make someone else an admin first" });
+  }
+  const client = await pool.connect();
+  let friendships;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT f.id, f.status, CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS other
+       FROM friendships f
+       JOIN users u1 ON u1.id = f.requester_id
+       JOIN users u2 ON u2.id = f.receiver_id
+       WHERE f.requester_id = $1 OR f.receiver_id = $1`,
+      [me[0].id]
+    );
+    friendships = rows;
+    const ids = rows.map(r => r.id);
+    await client.query('DELETE FROM song_history WHERE friendship_id = ANY($1::int[])', [ids]);
+    await client.query('DELETE FROM friendships WHERE id = ANY($1::int[])', [ids]);
+    await signOutEverywhere(name, client);
+    await client.query('DELETE FROM users WHERE id = $1', [me[0].id]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  for (const f of friendships) {
+    delete lastSentByFriendship[f.id];
+    io.in(`friendship-${f.id}`).socketsLeave(`friendship-${f.id}`);
+    if (f.status === 'accepted') io.to(`user-${f.other}`).emit('friendship-removed', { friendshipId: f.id });
+    else io.to(`user-${f.other}`).emit('friend-request-declined');
+  }
+  kickSockets(name);
+  req.session.destroy(() => res.json({ success: true }));
+});
+
+// Admin: give a user a temporary password (there's no email on file to send
+// a reset link to). Signs them out everywhere.
+app.post('/api/admin/reset-password', requireAdmin, async (req, res) => {
+  const target = String(req.body?.name ?? '').trim();
+  if (!target) return res.status(400).json({ error: 'Enter a username' });
+  const { rows } = await pool.query('SELECT name FROM users WHERE LOWER(name) = LOWER($1)', [target]);
+  if (rows.length === 0) return res.status(404).json({ error: 'No user with that name' });
+  const name = rows[0].name;
+  if (name === req.session.user.name) return res.status(400).json({ error: 'Use Change Password above for your own account' });
+  // Readable: no 0/O/1/l/I
+  const alphabet = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(10);
+  const tempPassword = [...bytes].map(b => alphabet[b % alphabet.length]).join('');
+  await pool.query('UPDATE users SET password_hash = $1 WHERE name = $2', [await bcrypt.hash(tempPassword, 10), name]);
+  await signOutEverywhere(name);
+  kickSockets(name);
+  res.json({ name, tempPassword });
 });
 
 app.post('/api/logout', (req, res) => {

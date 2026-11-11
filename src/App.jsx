@@ -52,6 +52,78 @@ function setFaviconPip(on) {
   img.src = FAVICON_URL;
 }
 
+// Settings → Delete account. Asks for the password before deleting anything.
+function DeleteAccount({ onDeleted }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true); setError('');
+    try {
+      const r = await fetch('/api/me', {
+        method: 'DELETE', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) onDeleted();
+      else setError(d.error || 'Could not delete your account');
+    } catch { setError('Network error — try again'); }
+    finally { setBusy(false); }
+  };
+  if (!open) {
+    return <button className="settings-danger-btn" onClick={() => setOpen(true)}>Delete Account</button>;
+  }
+  return (
+    <div className="settings-password-form">
+      <p className="settings-warning">This permanently deletes your account, your friends list and every swap's history. It can't be undone.</p>
+      <input type="password" placeholder="Your password" value={password} autoFocus
+        onChange={e => { setPassword(e.target.value); setError(''); }}
+        onKeyDown={e => { if (e.key === 'Enter' && password && !busy) submit(); }} />
+      {error && <p className="settings-feedback error">{error}</p>}
+      <div className="settings-actions">
+        <button className="settings-delete-confirm" disabled={!password || busy} onClick={submit}>{busy ? 'Deleting…' : 'Delete Forever'}</button>
+        <button className="link-btn" onClick={() => { setOpen(false); setPassword(''); setError(''); }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// Settings → Admin → Reset Password. Shows a temporary password to pass on.
+function AdminResetPassword() {
+  const [name, setName] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const submit = async () => {
+    setError(''); setResult(null); setCopied(false);
+    const r = await fetch('/api/admin/reset-password', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { setResult(d); setName(''); } else setError(d.error || 'Reset failed');
+  };
+  return (
+    <div className="settings-password-form">
+      <input placeholder="Username" value={name} autoCapitalize="off" autoCorrect="off"
+        onChange={e => { setName(e.target.value); setError(''); }}
+        onKeyDown={e => { if (e.key === 'Enter' && name.trim()) submit(); }} />
+      <button className="settings-save-btn" disabled={!name.trim()} onClick={submit}>Reset Password</button>
+      {error && <p className="settings-feedback error">{error}</p>}
+      {result && (
+        <p className="settings-feedback success">
+          Temporary password for <strong>{result.name}</strong>: <code className="temp-password">{result.tempPassword}</code>{' '}
+          <button className="link-btn" onClick={() => { navigator.clipboard?.writeText(result.tempPassword); setCopied(true); }}>{copied ? 'Copied' : 'Copy'}</button>
+          <br />They've been signed out. Send it to them privately and have them change it in Settings.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // 1–5 stars. Interactive when onRate is given, otherwise display-only.
 function StarRating({ value, onRate, className = '' }) {
   const [hover, setHover] = useState(0);
@@ -355,6 +427,7 @@ function App() {
   const [pendingInvite, setPendingInvite] = useState(readPendingInvite);
   const [pendingShare, setPendingShare] = useState(readPendingShare);
   const pendingShareRef = useRef(pendingShare);
+  const clearSessionRef = useRef(() => {});
   // Arriving logged out from an invite link goes straight to sign-up
   const [showAuth, setShowAuth] = useState(() => !!pendingInvite);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -546,6 +619,8 @@ function App() {
       else setUnreadFriendships(prev => prev.has(friendshipId) ? prev : new Set(prev).add(friendshipId));
     });
     socket.on('swap-read', ({ friendshipId }) => removeUnread(friendshipId));
+    // Account deleted on another device, or password reset by an admin
+    socket.on('force-logout', () => clearSessionRef.current());
     socket.on('song-cleared', () => setReceivedSong(null));
     socket.on('song-rated', applyRating);
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
@@ -577,6 +652,7 @@ function App() {
       socket.off('song-received');
       socket.off('swap-received');
       socket.off('swap-read');
+      socket.off('force-logout');
       socket.off('song-cleared');
       socket.off('song-rated');
       socket.off('all-songs-cleared');
@@ -831,14 +907,19 @@ function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const logout = () => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(() => {
+  // Back to the logged-out screen (after logout, account deletion, or being
+  // signed out by a password reset)
+  const clearSession = () => {
     setUser(null);
+    setShowSettings(false);
     // Clear the ref too, or the next account to log in on this tab inherits
     // the old open swap and it gets marked read for them
     activeFriendshipRef.current = null;
     setActiveFriendship(null);
     setUnreadFriendships(new Set());
-  });
+  };
+  useEffect(() => { clearSessionRef.current = clearSession; });
+  const logout = () => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(clearSession);
 
   if (user === undefined) return null;
 
@@ -862,6 +943,12 @@ function App() {
           ? <LoginForm onLogin={loadMe} />
           : <RegisterForm onLogin={loadMe} />
         }
+        {authMode === 'login' && (
+          <p id="auth-forgot">
+            Forgot your password? <a href="https://github.com/Mguaste/song-swap/issues" target="_blank" rel="noreferrer">Open an issue</a> with
+            your username (or ask the friend who invited you) and we'll send you a temporary one.
+          </p>
+        )}
         <p id="auth-toggle">
           {authMode === 'login' ? (
             <>No account? <button className="link-btn" onClick={() => setAuthMode('register')}>Sign up</button></>
@@ -1087,8 +1174,20 @@ function App() {
                     <label className="settings-label">Current Songs</label>
                     <button className="settings-danger-btn" onClick={() => fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' })}>Clear Current Songs</button>
                   </div>
+                  <div className="settings-row">
+                    <label className="settings-label">Reset Password</label>
+                    <AdminResetPassword />
+                  </div>
                 </div>
               )}
+
+              <div className="settings-section">
+                <h2 className="settings-section-title">Danger Zone</h2>
+                <div className="settings-row">
+                  <label className="settings-label">Delete Account</label>
+                  <DeleteAccount onDeleted={clearSession} />
+                </div>
+              </div>
             </div>
           ) : !activeFriendship && friends.length === 0 ? (
             <div id="empty-state" className="onboarding">
