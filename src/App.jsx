@@ -773,6 +773,9 @@ function App() {
 
   const logout = () => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(() => {
     setUser(null);
+    // Clear the ref too, or the next account to log in on this tab inherits
+    // the old open swap and it gets marked read for them
+    activeFriendshipRef.current = null;
     setActiveFriendship(null);
     setUnreadFriendships(new Set());
   });
