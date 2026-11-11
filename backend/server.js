@@ -85,6 +85,16 @@ const initDb = async () => {
   // 1–5 rating, set only by the friend who received the song
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating BETWEEN 1 AND 5)');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ');
+  // Profile pictures (small JPEG/PNG/WebP, resized in the browser before upload)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_avatars (
+      user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      image BYTEA NOT NULL,
+      mime TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS name_changed_at TIMESTAMPTZ');
   // When each user last looked at each swap, so unread status follows the
   // account across devices instead of living in one browser's localStorage
   await pool.query(`
@@ -390,7 +400,9 @@ app.post('/api/login', authLimiter, async (req, res) => {
 
 app.get('/api/me', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    "SELECT name, friend_code, COALESCE(preferred_platform, 'spotify') AS preferred_platform, is_admin FROM users WHERE name = $1",
+    `SELECT u.id, u.name, u.friend_code, COALESCE(u.preferred_platform, 'spotify') AS preferred_platform, u.is_admin,
+       u.name_changed_at, a.updated_at AS avatar_at
+     FROM users u LEFT JOIN user_avatars a ON a.user_id = u.id WHERE u.name = $1`,
     [req.session.user.name]
   );
   res.json(rows[0]);
@@ -491,6 +503,125 @@ app.post('/api/admin/reset-password', requireAdmin, async (req, res) => {
   await signOutEverywhere(name);
   kickSockets(name);
   res.json({ name, tempPassword });
+});
+
+// Names of everyone with a friendship or pending request with this user
+const connectedNames = async (userId) => {
+  const { rows } = await pool.query(
+    `SELECT CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS name
+     FROM friendships f JOIN users u1 ON u1.id = f.requester_id JOIN users u2 ON u2.id = f.receiver_id
+     WHERE f.requester_id = $1 OR f.receiver_id = $1`,
+    [userId]
+  );
+  return rows.map(r => r.name);
+};
+// Tell friends to reload their friends list (new name or picture)
+const notifyFriendsUpdated = async (userId) => {
+  for (const n of await connectedNames(userId)) io.to(`user-${n}`).emit('friend-updated');
+};
+
+// ── Profile pictures ──
+const AVATAR_MAX_BYTES = 300 * 1024;
+const imageMime = (buf) => {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buf.length > 12 && buf.subarray(0, 4).toString() === 'RIFF' && buf.subarray(8, 12).toString() === 'WEBP') return 'image/webp';
+  return null;
+};
+
+app.put('/api/me/avatar', requireAuth, express.raw({ type: 'image/*', limit: AVATAR_MAX_BYTES }), async (req, res) => {
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || buf.length === 0) return res.status(400).json({ error: 'No image received' });
+  const mime = imageMime(buf);
+  if (!mime) return res.status(400).json({ error: 'Use a JPEG, PNG or WebP image' });
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  const { rows } = await pool.query(
+    `INSERT INTO user_avatars (user_id, image, mime, updated_at) VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET image = EXCLUDED.image, mime = EXCLUDED.mime, updated_at = NOW()
+     RETURNING updated_at`,
+    [me[0].id, buf, mime]
+  );
+  notifyFriendsUpdated(me[0].id).catch(() => {});
+  res.json({ avatar_at: rows[0].updated_at });
+});
+
+app.delete('/api/me/avatar', requireAuth, async (req, res) => {
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  await pool.query('DELETE FROM user_avatars WHERE user_id = $1', [me[0].id]);
+  notifyFriendsUpdated(me[0].id).catch(() => {});
+  res.json({ success: true });
+});
+
+// Only you and people you have a friendship or request with can see your picture
+app.get('/api/avatars/:userId', requireAuth, async (req, res) => {
+  const target = Number(req.params.userId);
+  if (!Number.isInteger(target)) return res.status(400).end();
+  const { rows } = await pool.query(
+    `SELECT a.image, a.mime FROM user_avatars a
+     JOIN users me ON me.name = $2
+     WHERE a.user_id = $1 AND (me.id = $1 OR EXISTS (
+       SELECT 1 FROM friendships f
+       WHERE (f.requester_id = me.id AND f.receiver_id = $1) OR (f.receiver_id = me.id AND f.requester_id = $1)))`,
+    [target, req.session.user.name]
+  );
+  if (rows.length === 0) return res.status(404).end();
+  // URLs carry ?v=<updated_at>, so a new picture gets a new URL
+  res.set({ 'Content-Type': rows[0].mime, 'Cache-Control': 'private, max-age=604800' });
+  res.send(rows[0].image);
+});
+
+// ── Change username ──
+// Names are used as keys in several places (song_history.sent_by, sessions,
+// socket rooms, the current-song cache), so all of them move together.
+const RENAME_COOLDOWN_DAYS = 7;
+app.patch('/api/me/name', requireAuth, async (req, res) => {
+  const oldName = req.session.user.name;
+  const newName = String(req.body?.name ?? '').trim();
+  if (!newName) return res.status(400).json({ error: 'Enter a new username' });
+  if (newName.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
+  if (newName === oldName) return res.status(400).json({ error: "That's already your username" });
+  const { rows: me } = await pool.query('SELECT id, name_changed_at FROM users WHERE name = $1', [oldName]);
+  const last = me[0].name_changed_at;
+  if (last && Date.now() - new Date(last) < RENAME_COOLDOWN_DAYS * 864e5) {
+    const next = new Date(new Date(last).getTime() + RENAME_COOLDOWN_DAYS * 864e5);
+    return res.status(429).json({ error: `You can change your username again on ${next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Lock the user rows so two renames can't grab the same name
+    await client.query('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE');
+    const { rows: taken } = await client.query('SELECT 1 FROM users WHERE LOWER(name) = LOWER($1) AND id != $2', [newName, me[0].id]);
+    if (taken.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Username already taken' });
+    }
+    await client.query('UPDATE users SET name = $1, name_changed_at = NOW() WHERE id = $2', [newName, me[0].id]);
+    await client.query('UPDATE song_history SET sent_by = $1 WHERE sent_by = $2', [newName, oldName]);
+    await client.query(
+      `UPDATE user_sessions SET sess = jsonb_set(sess::jsonb, '{user,name}', to_jsonb($1::text))::json
+       WHERE sess->'user'->>'name' = $2`,
+      [newName, oldName]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  req.session.user = { name: newName };
+  for (const songs of Object.values(lastSentByFriendship)) {
+    if (songs[oldName]) {
+      songs[newName] = { ...songs[oldName], sentBy: newName };
+      delete songs[oldName];
+    }
+  }
+  io.in(`user-${oldName}`).socketsJoin(`user-${newName}`);
+  io.in(`user-${oldName}`).socketsLeave(`user-${oldName}`);
+  io.to(`user-${newName}`).emit('me-updated');
+  notifyFriendsUpdated(me[0].id).catch(() => {});
+  res.json({ name: newName });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -628,6 +759,9 @@ app.get('/api/friends', requireAuth, async (req, res) => {
     `SELECT f.id AS friendship_id,
        CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name,
        CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code,
+       CASE WHEN f.requester_id = $1 THEN u2.id ELSE u1.id END AS friend_id,
+       (SELECT a.updated_at FROM user_avatars a
+        WHERE a.user_id = CASE WHEN f.requester_id = $1 THEN u2.id ELSE u1.id END) AS friend_avatar_at,
        -- Latest song either way, or when the friendship started; the list is sorted by it
        COALESCE((SELECT MAX(sh.sent_at) FROM song_history sh WHERE sh.friendship_id = f.id), f.created_at) AS last_activity
      FROM friendships f

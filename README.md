@@ -58,6 +58,7 @@ https://ko-fi.com/mguaste
 * [x] Delete account + admin password reset
 * [x] Home dashboard: new for you, your turn, requests, invite nudge, songs you loved (logo = Home; phones open on it)
 * [x] Fixes: logging out no longer passes the open swap to the next login; deploys no longer bring back old "current" songs
+* [x] Profile pictures (friends-only, resized to 256px) + change username (once every 7 days)
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

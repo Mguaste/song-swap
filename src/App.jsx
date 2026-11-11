@@ -52,6 +52,103 @@ function setFaviconPip(on) {
   img.src = FAVICON_URL;
 }
 
+// Profile picture, or the first letter of the name when there isn't one
+function Avatar({ userId, avatarAt, name, className = '' }) {
+  const [failedFor, setFailedFor] = useState(null);
+  if (userId && avatarAt && failedFor !== avatarAt) {
+    return <img className={`friend-avatar avatar-img ${className}`} alt=""
+      src={`/api/avatars/${userId}?v=${encodeURIComponent(avatarAt)}`} onError={() => setFailedFor(avatarAt)} />;
+  }
+  return <span className={`friend-avatar ${className}`}>{(name?.[0] ?? '?').toUpperCase()}</span>;
+}
+
+// Center-crop to a square and shrink, so uploads stay small (~20–40 KB)
+const resizeImage = (file, size = 256) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#2a2a2a'; // behind transparent PNGs
+    ctx.fillRect(0, 0, size, size);
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('resize failed'))), 'image/jpeg', 0.85);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image")); };
+  img.src = url;
+});
+
+// Settings → Profile: picture and username
+function ProfileSettings({ user, onChanged }) {
+  const [picError, setPicError] = useState('');
+  const [picBusy, setPicBusy] = useState(false);
+  const [name, setName] = useState(user.name);
+  const [nameMsg, setNameMsg] = useState(null); // { error|success: text }
+  const fileRef = useRef(null);
+
+  const upload = async (file) => {
+    if (!file) return;
+    setPicError(''); setPicBusy(true);
+    try {
+      const blob = await resizeImage(file);
+      const r = await fetch('/api/me/avatar', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Upload failed');
+      onChanged();
+    } catch (e) { setPicError(e.message || 'Upload failed'); }
+    finally { setPicBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+  const removePic = async () => {
+    await fetch('/api/me/avatar', { method: 'DELETE', credentials: 'include' });
+    onChanged();
+  };
+  const rename = async () => {
+    setNameMsg(null);
+    const r = await fetch('/api/me/name', {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { setNameMsg({ success: `Username changed — log in as ${d.name} from now on` }); onChanged(); }
+    else setNameMsg({ error: d.error || 'Could not change username' });
+  };
+
+  return (
+    <>
+      <div className="settings-row">
+        <label className="settings-label">Profile Picture</label>
+        <div className="profile-pic-row">
+          <Avatar userId={user.id} avatarAt={user.avatar_at} name={user.name} className="avatar-lg" />
+          <div className="profile-pic-actions">
+            <button className="settings-save-btn" disabled={picBusy} onClick={() => fileRef.current?.click()}>
+              {picBusy ? 'Uploading…' : user.avatar_at ? 'Change Photo' : 'Add Photo'}
+            </button>
+            {user.avatar_at && !picBusy && <button className="link-btn" onClick={removePic}>Remove</button>}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={e => upload(e.target.files?.[0])} />
+        </div>
+      </div>
+      {picError && <p className="settings-feedback error">{picError}</p>}
+      <div className="settings-row">
+        <label className="settings-label">Username</label>
+        <div className="settings-password-form">
+          <input value={name} maxLength={30} autoCapitalize="off" autoCorrect="off"
+            onChange={e => { setName(e.target.value); setNameMsg(null); }}
+            onKeyDown={e => { if (e.key === 'Enter' && name.trim() && name.trim() !== user.name) rename(); }} />
+          <button className="settings-save-btn" disabled={!name.trim() || name.trim() === user.name} onClick={rename}>Change Username</button>
+          {nameMsg?.error && <p className="settings-feedback error">{nameMsg.error}</p>}
+          {nameMsg?.success && <p className="settings-feedback success">{nameMsg.success}</p>}
+          <p className="settings-hint">You can change it once every 7 days. Friends see the new name right away.</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
 const timeAgo = (iso) => {
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
   if (mins < 1) return 'just now';
@@ -64,7 +161,7 @@ const timeAgo = (iso) => {
 
 // Home screen when no swap is open: what's new, who you owe a song, requests,
 // an invite nudge, and songs you loved. Refetches whenever refreshKey changes.
-function Dashboard({ friendCount, friendRequests, sentRequests, refreshKey, onOpenFriend, onOpenSong,
+function Dashboard({ friends, friendCount, friendRequests, sentRequests, refreshKey, onOpenFriend, onOpenSong,
   onAccept, onDecline, onInvite, inviteCopied, pendingShare, onCancelShare }) {
   const [data, setData] = useState(null);
   useEffect(() => {
@@ -113,7 +210,10 @@ function Dashboard({ friendCount, friendRequests, sentRequests, refreshKey, onOp
           <div className="dash-chips">
             {yourTurn.map(f => (
               <button key={f.friendshipId} className="dash-chip" onClick={() => onOpenFriend(f.friendshipId)}>
-                <span className="friend-avatar">{f.friendName[0].toUpperCase()}</span>
+                {(() => {
+                  const fr = friends.find(x => x.friendship_id === f.friendshipId);
+                  return <Avatar userId={fr?.friend_id} avatarAt={fr?.friend_avatar_at} name={f.friendName} />;
+                })()}
                 {f.friendName}
               </button>
             ))}
@@ -771,6 +871,16 @@ function App() {
     socket.on('history-cleared', () => setHistory([]));
     socket.on('friend-request-received', () => loadRequests());
     socket.on('friendship-accepted', () => { loadFriends(); loadRequests(); });
+    // A friend changed their name or picture: refresh lists and the open swap
+    socket.on('friend-updated', async () => {
+      const list = await loadFriends();
+      loadRequests();
+      const active = activeFriendshipRef.current && list.find(f => f.friendship_id === activeFriendshipRef.current.friendship_id);
+      if (active) { activeFriendshipRef.current = active; setActiveFriendship(active); }
+      refreshActiveSwapRef.current();
+    });
+    // You changed your name/picture in another tab
+    socket.on('me-updated', () => loadMe());
     socket.on('friendship-removed', ({ friendshipId }) => closeFriendship(friendshipId));
     socket.on('friend-request-declined', () => loadRequests());
     return () => {
@@ -788,6 +898,8 @@ function App() {
       socket.off('history-cleared');
       socket.off('friend-request-received');
       socket.off('friendship-accepted');
+      socket.off('friend-updated');
+      socket.off('me-updated');
       socket.off('friendship-removed');
       socket.off('friend-request-declined');
     };
@@ -1132,6 +1244,9 @@ function App() {
         <button id="home-btn" onClick={goHome} aria-label="Home" title="Home">
           <img src={icon} id="logo" alt="" />
         </button>
+        {activeFriendship && !showSettings && (
+          <Avatar userId={activeFriendship.friend_id} avatarAt={activeFriendship.friend_avatar_at} name={activeFriendship.friend_name} className="avatar-header" />
+        )}
         <h1 id="main-title">
           {showSettings ? 'Settings' : activeFriendship ? activeFriendship.friend_name : 'Song Swap'}
         </h1>
@@ -1232,7 +1347,7 @@ function App() {
                     className={`friend-item${activeFriendship?.friendship_id === f.friendship_id ? ' active' : ''}`}
                     onClick={() => selectFriend(f)}
                   >
-                    <div className="friend-avatar">{f.friend_name[0].toUpperCase()}</div>
+                    <Avatar userId={f.friend_id} avatarAt={f.friend_avatar_at} name={f.friend_name} />
                     <span className="friend-name">{f.friend_name}</span>
                     {unreadFriendships.has(f.friendship_id) && <span className="unread-dot" />}
                   </div>
@@ -1252,6 +1367,7 @@ function App() {
               <div className="settings-section">
                 <h2 className="settings-section-title">Account</h2>
                 <p className="settings-signed-in">Logged in as <strong>{user.name}</strong></p>
+                <ProfileSettings key={user.name} user={user} onChanged={loadMe} />
                 <div className="settings-row">
                   <label className="settings-label">Change Password</label>
                   <div className="settings-password-form">
@@ -1377,6 +1493,7 @@ function App() {
             </div>
           ) : !activeFriendship ? (
             <Dashboard
+              friends={friends}
               friendCount={friends.length}
               friendRequests={friendRequests}
               sentRequests={sentRequests}

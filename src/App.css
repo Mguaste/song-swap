@@ -1986,3 +1986,13 @@ p.card-rating { flex-direction: row; justify-content: center; gap: 6px; }
 .dash-loved-item:hover img { filter: brightness(1.1); }
 .dash-loved-title { font-size: 0.82rem; font-weight: 600; }
 .dash-loved-sub { font-size: 0.74rem; color: #888; }
+
+/* ── Avatars ── */
+
+img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
+.friend-avatar.avatar-lg { width: 64px; height: 64px; font-size: 1.5rem; }
+.friend-avatar.avatar-header { width: 28px; height: 28px; font-size: 0.8rem; }
+
+.profile-pic-row { display: flex; align-items: center; gap: 14px; }
+.profile-pic-actions { display: flex; align-items: center; gap: 14px; }
+.settings-hint { margin: 0; font-size: 0.76rem; color: #666; }
