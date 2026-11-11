@@ -1244,8 +1244,13 @@ app.post('/api/verify', requireAuth, async (req, res) => {
 });
 
 initDb().then(async () => {
+  // Restore today's current songs after a restart. Only songs sent since the
+  // last midnight reset count; older ones were already cleared.
   const { rows } = await pool.query(
-    'SELECT DISTINCT ON (sent_by, friendship_id) * FROM song_history ORDER BY sent_by, friendship_id, sent_at DESC'
+    `SELECT DISTINCT ON (sent_by, friendship_id) * FROM song_history
+     WHERE sent_at >= (date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1)
+     ORDER BY sent_by, friendship_id, sent_at DESC`,
+    [RESET_TIMEZONE]
   );
   for (const r of rows) {
     if (!r.friendship_id) continue;
