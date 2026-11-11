@@ -30,7 +30,7 @@ https://ko-fi.com/mguaste
 
 
 ### stretch Goals
-* overview screen
+* [x] overview screen — home dashboard (stats/streaks still open, see Future ideas)
 * [x] song rating (1–5 stars, recipient only) — liked list done (dashboard); compatibility still open
 * [x] default music app/compatibility. 
 
@@ -51,12 +51,13 @@ https://ko-fi.com/mguaste
 * [x] Easier to leave Settings (Back link, highlighted gear, Esc, picking a friend closes it)
 * [x] Unread count in the tab title + red favicon pip, updating live
 * [x] Read status stored on the server (syncs across devices), tabs auto-reload after a deploy
-* [x] Mobile layout: no sideways scrolling, Settings stacks on phones
+* [x] Mobile layout: no sideways scrolling (incl. iPhone zoom-on-tap), Settings stacks on phones, shows "Logged in as"
 * [x] Installable app (Add to Home Screen) + `/share` link for sharing songs in
 * [x] Friends list sorted by recent activity (reorders live)
 * [x] Open swap refreshes when you come back to the tab or reconnect (no reload needed after phone sleep)
 * [x] Delete account + admin password reset
 * [x] Home dashboard: new for you, your turn, requests, invite nudge, songs you loved (logo = Home; phones open on it)
+* [x] Fixes: logging out no longer passes the open swap to the next login; deploys no longer bring back old "current" songs
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.
@@ -85,8 +86,8 @@ Data check (Nov 2026): 21 users but only 3 friendships, so the most important wo
 * [x] Password reset (admin reset button or recovery code, since there's no email on file) — admin button done
 
 **Infra / safety net**
-* [ ] Turn on Railway Postgres backups
-* [ ] Separate test database so changes can be tested for real before pushing
+* [ ] Postgres backups — Railway backups need the Pro plan; free option is a daily `pg_dump`
+* [x] Separate test database so changes can be tested for real before pushing (local Postgres)
 * [x] Railway CLI access for reading deploy logs
 * [x] Local development setup (local Postgres + `.env.example`)
 * [ ] Optional: Spotify API credentials (exact Spotify links + ISRC for everything; needs Spotify Premium on the dev account)
