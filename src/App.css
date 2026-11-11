@@ -1136,6 +1136,16 @@ img.album-art {
   background: #282828;
 }
 
+#settings-btn.active {
+  color: #10B981;
+  background: #282828;
+}
+
+#settings-back {
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+
 #settings-page {
   max-width: 520px;
   display: flex;

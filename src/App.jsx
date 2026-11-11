@@ -401,6 +401,14 @@ function App() {
 
   useEffect(() => { loadMe(); }, []);
 
+  // Escape closes the Settings page
+  useEffect(() => {
+    if (!showSettings) return;
+    const onKey = (e) => { if (e.key === 'Escape') setShowSettings(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showSettings]);
+
   useEffect(() => {
     userRef.current = user;
     if (!user) return;
@@ -474,6 +482,7 @@ function App() {
     const fresh = freshFriends.find(f => f.friendship_id === friendship.friendship_id) ?? friendship;
     setActiveFriendship(fresh);
     activeFriendshipRef.current = fresh;
+    setShowSettings(false);
     if (window.innerWidth <= 700) setSidebarOpen(false);
     setSongLink('');
     setSongDetails(null);
@@ -758,7 +767,7 @@ function App() {
           {user.is_admin && (
             <button id="admin-btn" onClick={() => setShowAdmin(v => !v)}>Admin</button>
           )}
-          <button id="settings-btn" onClick={() => setShowSettings(v => !v)} aria-label="Settings">
+          <button id="settings-btn" className={showSettings ? 'active' : ''} onClick={() => setShowSettings(v => !v)} aria-label={showSettings ? 'Close settings' : 'Settings'} aria-pressed={showSettings} title={showSettings ? 'Close settings' : 'Settings'}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
               <circle cx="12" cy="12" r="3"/>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -866,6 +875,7 @@ function App() {
         <main id="main-content">
           {showSettings ? (
             <div id="settings-page">
+              <button className="link-btn" id="settings-back" onClick={() => setShowSettings(false)}>← Back</button>
               <div className="settings-section">
                 <h2 className="settings-section-title">Account</h2>
                 <div className="settings-row">
