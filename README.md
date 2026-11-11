@@ -31,7 +31,7 @@ https://ko-fi.com/mguaste
 
 ### stretch Goals
 * overview screen
-* [x] song rating (1–5 stars, recipient only) — compatibility/liked list still open
+* [x] song rating (1–5 stars, recipient only) — liked list done (dashboard); compatibility still open
 * [x] default music app/compatibility. 
 
 ### elastigirl goal
@@ -56,6 +56,7 @@ https://ko-fi.com/mguaste
 * [x] Friends list sorted by recent activity (reorders live)
 * [x] Open swap refreshes when you come back to the tab or reconnect (no reload needed after phone sleep)
 * [x] Delete account + admin password reset
+* [x] Home dashboard: new for you, your turn, requests, invite nudge, songs you loved (logo = Home; phones open on it)
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

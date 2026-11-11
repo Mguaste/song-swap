@@ -52,6 +52,123 @@ function setFaviconPip(on) {
   img.src = FAVICON_URL;
 }
 
+const timeAgo = (iso) => {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return days < 30 ? `${days}d ago` : new Date(iso).toLocaleDateString();
+};
+
+// Home screen when no swap is open: what's new, who you owe a song, requests,
+// an invite nudge, and songs you loved. Refetches whenever refreshKey changes.
+function Dashboard({ friendCount, friendRequests, sentRequests, refreshKey, onOpenFriend, onOpenSong,
+  onAccept, onDecline, onInvite, inviteCopied, pendingShare, onCancelShare }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/dashboard', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d) setData(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  const newForYou = data?.newForYou ?? [];
+  const yourTurn = data?.yourTurn ?? [];
+  const loved = data?.loved ?? [];
+  const nothingYet = data && !newForYou.length && !yourTurn.length && !friendRequests.length;
+
+  return (
+    <div id="dashboard">
+      {pendingShare && (
+        <div className="dash-card dash-share">
+          <p>Pick a friend to send the song you shared</p>
+          <button className="link-btn" onClick={onCancelShare}>Cancel</button>
+        </div>
+      )}
+
+      {newForYou.length > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">New for you</h2>
+          {newForYou.map(s => (
+            <button key={s.id} className="dash-card dash-song" onClick={() => onOpenFriend(s.friendshipId)}>
+              {s.albumArt ? <img src={s.albumArt} alt="" className="dash-art" /> : <div className="dash-art placeholder" />}
+              <span className="dash-song-text">
+                <span className="dash-song-title">{s.title}</span>
+                <span className="dash-song-sub">{s.artist}</span>
+                <span className="dash-song-meta">from {s.friendName} · {timeAgo(s.sentAt)}</span>
+              </span>
+              <span className="dash-chevron">›</span>
+            </button>
+          ))}
+        </section>
+      )}
+
+      {yourTurn.length > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">Your turn <span className="dash-hint">· no song sent today</span></h2>
+          <div className="dash-chips">
+            {yourTurn.map(f => (
+              <button key={f.friendshipId} className="dash-chip" onClick={() => onOpenFriend(f.friendshipId)}>
+                <span className="friend-avatar">{f.friendName[0].toUpperCase()}</span>
+                {f.friendName}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {(friendRequests.length > 0 || sentRequests.length > 0) && (
+        <section className="dash-section">
+          <h2 className="dash-title">Requests</h2>
+          {friendRequests.map(r => (
+            <div key={r.id} className="dash-card dash-request">
+              <span><strong>{r.from_name}</strong> wants to swap</span>
+              <span className="request-actions">
+                <button className="accept-btn" aria-label={`Accept ${r.from_name}`} onClick={() => onAccept(r.id)}>✓</button>
+                <button className="decline-btn" aria-label={`Decline ${r.from_name}`} onClick={() => onDecline(r.id)}>✕</button>
+              </span>
+            </div>
+          ))}
+          {sentRequests.length > 0 && (
+            <p className="dash-waiting">Waiting on {sentRequests.map(r => r.to_name).join(', ')} to accept</p>
+          )}
+        </section>
+      )}
+
+      {friendCount < 3 && (
+        <div className="dash-card dash-invite">
+          <div>
+            <p className="dash-invite-title">Invite a friend</p>
+            <p className="dash-invite-sub">Song Swap is better with more people to swap with.</p>
+          </div>
+          <button id="dash-invite-btn" onClick={onInvite}>{inviteCopied ? '✓ Link copied' : 'Share invite link'}</button>
+        </div>
+      )}
+
+      {nothingYet && <p className="dash-empty">You're all caught up — nothing new right now.</p>}
+
+      {loved.length > 0 && (
+        <section className="dash-section">
+          <h2 className="dash-title">Songs you loved <span className="dash-hint">· rated 4★ or more</span></h2>
+          <div className="dash-loved">
+            {loved.map(s => (
+              <button key={s.id} className="dash-loved-item" onClick={() => onOpenSong(s)} title={`${s.title} — ${s.artist} (from ${s.friendName})`}>
+                {s.albumArt ? <img src={s.albumArt} alt="" /> : <div className="dash-art placeholder" />}
+                <span className="dash-loved-title">{s.title}</span>
+                <span className="dash-loved-sub">{s.artist}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 // Settings → Delete account. Asks for the password before deleting anything.
 function DeleteAccount({ onDeleted }) {
   const [open, setOpen] = useState(false);
@@ -432,7 +549,9 @@ function App() {
   const songLinkRef = useRef('');
   // Arriving logged out from an invite link goes straight to sign-up
   const [showAuth, setShowAuth] = useState(() => !!pendingInvite);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Phones start on the dashboard; the sidebar is opened with ☰
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 700);
+  const [dashTick, setDashTick] = useState(0);
 
   // Friends
   const [friends, setFriends] = useState([]);
@@ -561,6 +680,7 @@ function App() {
       if (document.visibilityState !== 'visible' || !userRef.current) return;
       loadUnreadStatus(userRef.current);
       refreshActiveSwapRef.current();
+      setDashTick(t => t + 1);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
@@ -626,7 +746,7 @@ function App() {
     socket.on('swap-read', ({ friendshipId }) => removeUnread(friendshipId));
     // Account deleted on another device, or password reset by an admin
     socket.on('force-logout', () => clearSessionRef.current());
-    socket.on('song-cleared', () => setReceivedSong(null));
+    socket.on('song-cleared', () => { setReceivedSong(null); setDashTick(t => t + 1); });
     socket.on('song-rated', applyRating);
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
     socket.on('send-success', () => { setSent(true); setTimeout(() => { setSent(false); setSongLink(''); }, 1500); });
@@ -910,6 +1030,25 @@ function App() {
     } catch { window.prompt('Copy your invite link:', url); }
   };
 
+  // Back to the dashboard
+  const goHome = () => {
+    activeFriendshipRef.current = null;
+    setActiveFriendship(null);
+    setShowSettings(false);
+    setSongLink('');
+    setSongDetails(null);
+    setReceivedSong(null);
+    setHistory([]);
+    setVerifyError('');
+    setDuplicate(null);
+    if (window.innerWidth <= 700) setSidebarOpen(false);
+  };
+
+  const openFriendById = (friendshipId) => {
+    const f = friends.find(x => x.friendship_id === friendshipId);
+    if (f) selectFriend(f);
+  };
+
   const acceptRequest = async (id) => {
     await fetch(`/api/friends/accept/${id}`, { method: 'POST', credentials: 'include' });
     await Promise.all([loadFriends(), loadRequests()]);
@@ -990,7 +1129,9 @@ function App() {
           <span className="bar" /><span className="bar" /><span className="bar" />
           {unreadFriendships.size > 0 && <span className="unread-badge">{unreadFriendships.size}</span>}
         </button>
-        <img src={icon} id="logo" alt='icon' />
+        <button id="home-btn" onClick={goHome} aria-label="Home" title="Home">
+          <img src={icon} id="logo" alt="" />
+        </button>
         <h1 id="main-title">
           {showSettings ? 'Settings' : activeFriendship ? activeFriendship.friend_name : 'Song Swap'}
         </h1>
@@ -1235,17 +1376,20 @@ function App() {
               )}
             </div>
           ) : !activeFriendship ? (
-            <div id="empty-state">
-              <img src={icon} id="empty-logo" alt="icon" />
-              {pendingShare ? (
-                <>
-                  <p id="share-pick">Pick a friend to send the song you shared</p>
-                  <button className="link-btn" onClick={() => { pendingShareRef.current = null; setPendingShare(null); clearPendingShare(); }}>Cancel</button>
-                </>
-              ) : (
-                <p>Select a friend to start swapping songs</p>
-              )}
-            </div>
+            <Dashboard
+              friendCount={friends.length}
+              friendRequests={friendRequests}
+              sentRequests={sentRequests}
+              refreshKey={`${[...unreadFriendships].sort().join()}|${friends.map(f => f.last_activity).join()}|${dashTick}`}
+              onOpenFriend={openFriendById}
+              onOpenSong={openSong}
+              onAccept={acceptRequest}
+              onDecline={declineRequest}
+              onInvite={shareInvite}
+              inviteCopied={inviteCopied}
+              pendingShare={pendingShare}
+              onCancelShare={() => { pendingShareRef.current = null; setPendingShare(null); clearPendingShare(); }}
+            />
           ) : (
 
             <>

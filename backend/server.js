@@ -664,6 +664,57 @@ app.get('/api/friends/latest-activity', requireAuth, async (req, res) => {
 });
 
 // Mark a swap as read for the current user, and tell their other tabs/devices
+// Everything the home dashboard shows, in one request
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  const { rows: me } = await pool.query('SELECT id, name FROM users WHERE name = $1', [req.session.user.name]);
+  const [uid, name] = [me[0].id, me[0].name];
+  const mine = `SELECT f.id, CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name
+    FROM friendships f JOIN users u1 ON u1.id = f.requester_id JOIN users u2 ON u2.id = f.receiver_id
+    WHERE (f.requester_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'`;
+  const [newForYou, yourTurn, loved] = await Promise.all([
+    // Latest song from each friend that you haven't looked at yet
+    pool.query(
+      `WITH mine AS (${mine})
+       SELECT * FROM (
+         SELECT DISTINCT ON (sh.friendship_id) sh.*, m.friend_name, r.last_read_at
+         FROM song_history sh JOIN mine m ON m.id = sh.friendship_id
+         LEFT JOIN friendship_reads r ON r.friendship_id = sh.friendship_id AND r.user_id = $1
+         WHERE sh.sent_by != $2
+         ORDER BY sh.friendship_id, sh.sent_at DESC
+       ) latest
+       WHERE last_read_at IS NULL OR sent_at > last_read_at
+       ORDER BY sent_at DESC`,
+      [uid, name]
+    ),
+    // Friends you haven't sent a song to since today's reset
+    pool.query(
+      `WITH mine AS (${mine})
+       SELECT m.id AS friendship_id, m.friend_name FROM mine m
+       WHERE NOT EXISTS (
+         SELECT 1 FROM song_history sh
+         WHERE sh.friendship_id = m.id AND sh.sent_by = $2
+           AND sh.sent_at >= (date_trunc('day', NOW() AT TIME ZONE $3) AT TIME ZONE $3)
+       )
+       ORDER BY m.friend_name`,
+      [uid, name, RESET_TIMEZONE]
+    ),
+    // Songs friends sent you that you rated 4 or 5 stars
+    pool.query(
+      `WITH mine AS (${mine})
+       SELECT sh.*, m.friend_name FROM song_history sh JOIN mine m ON m.id = sh.friendship_id
+       WHERE sh.sent_by != $2 AND sh.rating >= 4
+       ORDER BY COALESCE(sh.rated_at, sh.sent_at) DESC LIMIT 24`,
+      [uid, name]
+    ),
+  ]);
+  const withFriend = r => ({ ...rowToEntry(r), friendName: r.friend_name });
+  res.json({
+    newForYou: newForYou.rows.map(withFriend),
+    yourTurn: yourTurn.rows.map(r => ({ friendshipId: r.friendship_id, friendName: r.friend_name })),
+    loved: loved.rows.map(withFriend),
+  });
+});
+
 app.post('/api/friends/:id/read', requireAuth, async (req, res) => {
   const name = req.session.user.name;
   if (!(await isFriendshipMember(name, req.params.id))) return res.status(403).json({ error: 'Forbidden' });

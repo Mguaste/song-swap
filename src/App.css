@@ -1838,3 +1838,151 @@ p.card-rating { flex-direction: row; justify-content: center; gap: 6px; }
 #onboarding-code span { font-family: monospace; letter-spacing: 0.12em; color: #fff; font-weight: 700; }
 
 #onboarding-waiting { margin: 0; font-size: 0.8rem; color: #10B981; }
+
+/* ── Home button (logo) ── */
+
+#home-btn {
+  display: flex;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+#home-btn:focus-visible { outline: 2px solid #10B981; outline-offset: 2px; }
+
+/* ── Dashboard ── */
+
+#dashboard {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.dash-section { display: flex; flex-direction: column; gap: 8px; }
+
+.dash-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #10B981;
+  margin: 0 0 2px;
+}
+.dash-hint { color: #555; letter-spacing: 0.04em; text-transform: none; font-weight: 500; }
+
+.dash-card {
+  background: #181818;
+  border: 1px solid #282828;
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.dash-song {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dash-song:hover { border-color: #10B981; background: #1c1c1c; }
+
+.dash-art { width: 52px; height: 52px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.dash-art.placeholder { background: #2a2a2a; }
+
+.dash-song-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.dash-song-title, .dash-song-sub, .dash-song-meta, .dash-loved-title, .dash-loved-sub {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dash-song-title { font-weight: 600; }
+.dash-song-sub { color: #b3b3b3; font-size: 0.82rem; }
+.dash-song-meta { color: #10B981; font-size: 0.76rem; }
+.dash-chevron { color: #555; font-size: 1.4rem; flex-shrink: 0; }
+
+.dash-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dash-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 5px;
+  background: #181818;
+  border: 1px solid #282828;
+  border-radius: 24px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  max-width: 100%;
+  transition: border-color 0.15s;
+}
+.dash-chip:hover { border-color: #10B981; }
+.dash-chip .friend-avatar { width: 26px; height: 26px; font-size: 0.75rem; }
+
+.dash-request { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dash-waiting { margin: 0; color: #888; font-size: 0.82rem; }
+
+.dash-invite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-color: #10B98155;
+  background: linear-gradient(135deg, #10B98114, #181818);
+}
+.dash-invite-title { margin: 0; font-weight: 700; }
+.dash-invite-sub { margin: 2px 0 0; color: #b3b3b3; font-size: 0.82rem; }
+#dash-invite-btn {
+  padding: 9px 18px;
+  font-family: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  background: #10B981;
+  color: #000;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+}
+#dash-invite-btn:hover { filter: brightness(1.1); }
+
+.dash-share { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-color: #10B981; }
+.dash-share p { margin: 0; font-weight: 500; }
+
+.dash-empty { text-align: center; color: #666; font-size: 0.9rem; margin: 8px 0; }
+
+.dash-loved {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 12px;
+}
+.dash-loved-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: #fff;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dash-loved-item img, .dash-loved-item .dash-art {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.dash-loved-item:hover img { filter: brightness(1.1); }
+.dash-loved-title { font-size: 0.82rem; font-weight: 600; }
+.dash-loved-sub { font-size: 0.74rem; color: #888; }
