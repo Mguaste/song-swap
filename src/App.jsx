@@ -1374,11 +1374,8 @@ function App() {
         <button id="home-btn" onClick={goHome} aria-label="Home" title="Home">
           <img src={icon} id="logo" alt="" />
         </button>
-        {activeFriendship && !showSettings && (
-          <Avatar userId={activeFriendship.friend_id} avatarAt={activeFriendship.friend_avatar_at} name={activeFriendship.friend_name} className="avatar-header" />
-        )}
         <h1 id="main-title">
-          {showSettings ? 'Settings' : activeFriendship ? activeFriendship.friend_name : 'Song Swap'}
+          Song Swap
         </h1>
         <div id="user-info">
           <span id="user-name">{user.name}</span>
@@ -1494,6 +1491,7 @@ function App() {
           {showSettings ? (
             <div id="settings-page">
               <button className="link-btn" id="settings-back" onClick={() => setShowSettings(false)}>← Back</button>
+              <h2 className="page-heading">Settings</h2>
               <div className="settings-section">
                 <h2 className="settings-section-title">Account</h2>
                 <p className="settings-signed-in">Logged in as <strong>{user.name}</strong></p>
@@ -1641,6 +1639,18 @@ function App() {
           ) : (
 
             <>
+              <div id="swap-header">
+                <Avatar userId={activeFriendship.friend_id} avatarAt={activeFriendship.friend_avatar_at}
+                  name={activeFriendship.friend_name} className="avatar-swap" />
+                <div className="swap-header-text">
+                  <h2 className="page-heading">{activeFriendship.friend_name}</h2>
+                  <p className="swap-header-sub">
+                    {history.length > 0
+                      ? `${history.length} song${history.length > 1 ? 's' : ''} swapped · last ${timeAgo(history[0].sentAt)}`
+                      : 'No songs swapped yet — send the first one'}
+                  </p>
+                </div>
+              </div>
               <div id="song-swap-main">
                 <div className="song-cont">
                   <h2 className="song-cont-title">Send</h2>

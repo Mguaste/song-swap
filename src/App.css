@@ -2062,3 +2062,24 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 .dash-recent { padding: 4px; display: flex; flex-direction: column; }
 .dash-song-meta-muted { color: #888; font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-recent-rating { color: #f5c518; font-size: 0.72rem; flex-shrink: 0; letter-spacing: 1px; }
+
+/* ── Page headings (swap page, Settings) ── */
+
+.page-heading {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+#swap-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 20px;
+}
+.swap-header-text { min-width: 0; }
+.swap-header-sub { margin: 3px 0 0; color: #888; font-size: 0.84rem; }
+.friend-avatar.avatar-swap { width: 52px; height: 52px; font-size: 1.3rem; }
