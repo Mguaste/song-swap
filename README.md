@@ -54,6 +54,8 @@ https://ko-fi.com/mguaste
 * [x] Mobile layout: no sideways scrolling, Settings stacks on phones
 * [x] Installable app (Add to Home Screen) + `/share` link for sharing songs in
 * [x] Friends list sorted by recent activity (reorders live)
+* [x] Open swap refreshes when you come back to the tab or reconnect (no reload needed after phone sleep)
+* [x] Delete account + admin password reset
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

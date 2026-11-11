@@ -428,6 +428,8 @@ function App() {
   const [pendingShare, setPendingShare] = useState(readPendingShare);
   const pendingShareRef = useRef(pendingShare);
   const clearSessionRef = useRef(() => {});
+  const refreshActiveSwapRef = useRef(() => {});
+  const songLinkRef = useRef('');
   // Arriving logged out from an invite link goes straight to sign-up
   const [showAuth, setShowAuth] = useState(() => !!pendingInvite);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -556,7 +558,9 @@ function App() {
   // song arrived for it while the tab was hidden.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && userRef.current) loadUnreadStatus(userRef.current);
+      if (document.visibilityState !== 'visible' || !userRef.current) return;
+      loadUnreadStatus(userRef.current);
+      refreshActiveSwapRef.current();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
@@ -601,6 +605,7 @@ function App() {
       if (activeFriendshipRef.current) socket.emit('join-friendship', activeFriendshipRef.current.friendship_id);
       // Catch up on anything sent while disconnected (server restart, phone sleep)
       loadUnreadStatus(user);
+      refreshActiveSwapRef.current();
     };
     socket.on('connect', joinRooms);
     socket.disconnect().connect();
@@ -668,6 +673,33 @@ function App() {
     };
   }, []);
 
+  // A swap's history, the friend's current song, and the song you sent.
+  // Each is undefined if its request failed.
+  const fetchSwap = async (friendshipId) => {
+    const get = (what) => fetch(`/api/friends/${friendshipId}/${what}`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : undefined)).catch(() => undefined);
+    const [hist, cur, mine] = await Promise.all([get('history'), get('current-song'), get('my-song')]);
+    const received = cur === undefined ? undefined : (cur && cur.sentBy !== userRef.current?.name ? cur : null);
+    return { hist, received, mine };
+  };
+
+  // Re-fetch the open swap after coming back to the tab or reconnecting, since
+  // songs sent while the phone slept or the socket was down were missed.
+  // Leaves a link you're typing or a verified-but-unsent song alone.
+  const refreshActiveSwap = async () => {
+    const id = activeFriendshipRef.current?.friendship_id;
+    if (!id) return;
+    const { hist, received, mine } = await fetchSwap(id);
+    if (activeFriendshipRef.current?.friendship_id !== id) return; // switched friends meanwhile
+    if (hist) setHistory(hist);
+    if (received !== undefined) setReceivedSong(received);
+    if (mine !== undefined && !songLinkRef.current.trim()) {
+      setSongDetails(prev => (prev && !prev.id ? prev : mine));
+    }
+  };
+  useEffect(() => { refreshActiveSwapRef.current = refreshActiveSwap; });
+  useEffect(() => { songLinkRef.current = songLink; }, [songLink]);
+
   const selectFriend = async (friendship) => {
     const freshFriends = await loadFriends();
     const fresh = freshFriends.find(f => f.friendship_id === friendship.friendship_id) ?? friendship;
@@ -684,23 +716,10 @@ function App() {
     markRead(friendship.friendship_id);
 
     socket.emit('join-friendship', friendship.friendship_id);
-    const [histRes, curRes, myRes] = await Promise.all([
-      fetch(`/api/friends/${friendship.friendship_id}/history`, { credentials: 'include' }),
-      fetch(`/api/friends/${friendship.friendship_id}/current-song`, { credentials: 'include' }),
-      fetch(`/api/friends/${friendship.friendship_id}/my-song`, { credentials: 'include' }),
-    ]);
-    if (histRes.ok) {
-      const hist = await histRes.json();
-      setHistory(hist);
-    }
-    if (curRes.ok) {
-      const song = await curRes.json();
-      if (song && song.sentBy !== user.name) setReceivedSong(song);
-    }
-    if (myRes.ok) {
-      const mySong = await myRes.json();
-      if (mySong) setSongDetails(mySong);
-    }
+    const { hist, received, mine } = await fetchSwap(friendship.friendship_id);
+    if (hist) setHistory(hist);
+    if (received) setReceivedSong(received);
+    if (mine) setSongDetails(mine);
     const shared = pendingShareRef.current;
     if (shared) {
       pendingShareRef.current = null;
