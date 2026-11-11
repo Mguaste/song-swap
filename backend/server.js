@@ -261,6 +261,17 @@ io.on('connection', (socket) => {
       lastSentByFriendship[friendshipId][sentBy] = entry;
       socket.emit('send-success');
       socket.to(`friendship-${friendshipId}`).emit('song-received', entry);
+      // Tell the recipient on every tab, even ones not viewing this friendship,
+      // so unread badges and the tab title update live
+      const { rows: other } = await pool.query(
+        `SELECT u.name FROM friendships f
+         JOIN users u ON u.id IN (f.requester_id, f.receiver_id)
+         WHERE f.id = $1 AND u.name != $2`,
+        [friendshipId, sentBy]
+      );
+      for (const { name } of other) {
+        io.to(`user-${name}`).emit('swap-received', { friendshipId, sentAt: entry.sentAt });
+      }
       io.to(`friendship-${friendshipId}`).emit('history-updated', entry);
     } catch (err) {
       // Without this, a DB error here is an unhandled rejection that kills the server

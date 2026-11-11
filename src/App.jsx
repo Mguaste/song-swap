@@ -5,6 +5,37 @@ import icon from './assets/SSLogo.png'
 
 const socket = io();
 
+const BASE_TITLE = document.title;
+const FAVICON_URL = '/swap-favicon.png';
+let faviconWithPip = null; // data URL, drawn once on first use
+
+// Swap the tab icon between the plain favicon and one with a red unread pip
+function setFaviconPip(on) {
+  const link = document.querySelector('link[rel="icon"]');
+  if (!link) return;
+  if (!on) { link.href = FAVICON_URL; return; }
+  if (faviconWithPip) { link.href = faviconWithPip; return; }
+  const img = new Image();
+  img.onload = () => {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    ctx.beginPath();
+    ctx.arc(size * 0.76, size * 0.24, size * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+    ctx.lineWidth = size * 0.06;
+    ctx.strokeStyle = '#121212';
+    ctx.stroke();
+    faviconWithPip = canvas.toDataURL('image/png');
+    // Only apply if there's still something unread by the time it loaded
+    if (document.title !== BASE_TITLE) link.href = faviconWithPip;
+  };
+  img.src = FAVICON_URL;
+}
+
 // 1–5 stars. Interactive when onRate is given, otherwise display-only.
 function StarRating({ value, onRate, className = '' }) {
   const [hover, setHover] = useState(0);
@@ -401,6 +432,24 @@ function App() {
 
   useEffect(() => { loadMe(); }, []);
 
+  // Unread count in the tab title, plus a red pip on the favicon
+  useEffect(() => {
+    const count = unreadFriendships.size;
+    document.title = count > 0 ? `(${count}) ${BASE_TITLE}` : BASE_TITLE;
+    setFaviconPip(count > 0);
+  }, [unreadFriendships]);
+
+  // A swap from the open friend that arrived while the tab was hidden counts
+  // as unread until the tab is looked at again
+  useEffect(() => {
+    const onVisible = () => {
+      const active = activeFriendshipRef.current;
+      if (document.visibilityState === 'visible' && active) markRead(active.friendship_id);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
   // Escape closes the Settings page
   useEffect(() => {
     if (!showSettings) return;
@@ -438,6 +487,12 @@ function App() {
     socket.on('song-received', (song) => {
       if (song.friendshipId === activeFriendshipRef.current?.friendship_id) setReceivedSong(song);
     });
+    socket.on('swap-received', ({ friendshipId, sentAt }) => {
+      const viewing = friendshipId === activeFriendshipRef.current?.friendship_id
+        && document.visibilityState === 'visible';
+      if (viewing) markRead(friendshipId, sentAt);
+      else setUnreadFriendships(prev => prev.has(friendshipId) ? prev : new Set(prev).add(friendshipId));
+    });
     socket.on('song-cleared', () => setReceivedSong(null));
     socket.on('song-rated', applyRating);
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
@@ -462,6 +517,7 @@ function App() {
     socket.on('friend-request-declined', () => loadRequests());
     return () => {
       socket.off('song-received');
+      socket.off('swap-received');
       socket.off('song-cleared');
       socket.off('song-rated');
       socket.off('all-songs-cleared');
@@ -712,6 +768,7 @@ function App() {
   const logout = () => fetch('/api/logout', { method: 'POST', credentials: 'include' }).then(() => {
     setUser(null);
     setActiveFriendship(null);
+    setUnreadFriendships(new Set());
   });
 
   if (user === undefined) return null;
