@@ -960,6 +960,7 @@ function App() {
               <button className="link-btn" id="settings-back" onClick={() => setShowSettings(false)}>← Back</button>
               <div className="settings-section">
                 <h2 className="settings-section-title">Account</h2>
+                <p className="settings-signed-in">Logged in as <strong>{user.name}</strong></p>
                 <div className="settings-row">
                   <label className="settings-label">Change Password</label>
                   <div className="settings-password-form">
