@@ -1,5 +1,14 @@
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Never scroll sideways (iOS Safari ignores this on body alone, hence html too) */
+html, body { overflow-x: hidden; }
+
+/* iOS Safari zooms in when a text box under 16px is tapped, and the zoomed
+   page then pans sideways. 16px on phones stops the zoom. */
+@media (max-width: 700px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+
 body {
   margin: 0;
   background: #121212;
