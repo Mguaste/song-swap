@@ -410,6 +410,11 @@ function App() {
     }
   };
 
+  // Move a friend to the top of the list when a song is sent or received
+  const bumpActivity = (friendshipId, sentAt) => setFriends(prev => prev.map(f =>
+    f.friendship_id === friendshipId && (!f.last_activity || new Date(sentAt) > new Date(f.last_activity))
+      ? { ...f, last_activity: sentAt } : f));
+
   const loadFriends = async () => {
     const r = await fetch('/api/friends', { credentials: 'include' });
     if (r.ok) {
@@ -533,7 +538,8 @@ function App() {
     socket.on('song-received', (song) => {
       if (song.friendshipId === activeFriendshipRef.current?.friendship_id) setReceivedSong(song);
     });
-    socket.on('swap-received', ({ friendshipId }) => {
+    socket.on('swap-received', ({ friendshipId, sentAt }) => {
+      bumpActivity(friendshipId, sentAt);
       const viewing = friendshipId === activeFriendshipRef.current?.friendship_id
         && document.visibilityState === 'visible';
       if (viewing) markRead(friendshipId);
@@ -547,6 +553,7 @@ function App() {
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('send-error', ({ error }) => setVerifyError(error || 'Could not send that song'));
     socket.on('history-updated', (entry) => {
+      bumpActivity(entry.friendshipId, entry.sentAt);
       if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
         setHistory(prev => [entry, ...prev]);
         if (entry.sentBy === userRef.current?.name) {
@@ -972,7 +979,7 @@ function App() {
               {friends.length === 0 ? (
                 <p className="empty-msg">No friends yet</p>
               ) : (
-                friends.map(f => (
+                [...friends].sort((a, b) => new Date(b.last_activity || 0) - new Date(a.last_activity || 0)).map(f => (
                   <div
                     key={f.friendship_id}
                     className={`friend-item${activeFriendship?.friendship_id === f.friendship_id ? ' active' : ''}`}

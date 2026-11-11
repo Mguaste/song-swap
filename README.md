@@ -53,6 +53,7 @@ https://ko-fi.com/mguaste
 * [x] Read status stored on the server (syncs across devices), tabs auto-reload after a deploy
 * [x] Mobile layout: no sideways scrolling, Settings stacks on phones
 * [x] Installable app (Add to Home Screen) + `/share` link for sharing songs in
+* [x] Friends list sorted by recent activity (reorders live)
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

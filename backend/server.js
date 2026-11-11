@@ -549,11 +549,14 @@ app.get('/api/friends', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT f.id AS friendship_id,
        CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name,
-       CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code
+       CASE WHEN f.requester_id = $1 THEN u2.friend_code ELSE u1.friend_code END AS friend_code,
+       -- Latest song either way, or when the friendship started; the list is sorted by it
+       COALESCE((SELECT MAX(sh.sent_at) FROM song_history sh WHERE sh.friendship_id = f.id), f.created_at) AS last_activity
      FROM friendships f
      JOIN users u1 ON u1.id = f.requester_id
      JOIN users u2 ON u2.id = f.receiver_id
-     WHERE (f.requester_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'`,
+     WHERE (f.requester_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'
+     ORDER BY last_activity DESC, friend_name`,
     [me[0].id]
   );
   res.json(rows);
