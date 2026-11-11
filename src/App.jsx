@@ -182,6 +182,26 @@ function ProgressRing({ done, total }) {
   );
 }
 
+// "75% match · you both sent Frank Ocean", or how far off a match is
+function MatchLine({ match }) {
+  if (!match) return null;
+  if (!match.ready) {
+    const parts = [];
+    if (match.songsNeeded) parts.push(`swap ${match.songsNeeded} more song${match.songsNeeded > 1 ? 's' : ''}`);
+    if (match.ratingsNeeded) parts.push(`rate ${match.ratingsNeeded} more`);
+    const text = parts.join(' and ');
+    return <p className="match-line pending">{text.charAt(0).toUpperCase() + text.slice(1)} to see your match</p>;
+  }
+  const detail = match.sharedArtists?.length
+    ? `you both sent ${match.sharedArtists.join(', ')}`
+    : [match.youGive && `you rate theirs ${match.youGive}★`, match.theyGive && `they rate yours ${match.theyGive}★`].filter(Boolean).join(' · ');
+  return (
+    <p className="match-line" title="80% from how you rate each other's songs, 20% from artists you both send">
+      <strong>{match.percent}% match</strong>{detail ? ` · ${detail}` : ''}
+    </p>
+  );
+}
+
 const SmallArt = ({ song }) => (song?.albumArt ? <img src={song.albumArt} alt="" className="dash-art-sm" /> : <span className="dash-art-sm placeholder" />);
 
 // Home screen when no swap is open. Refetches whenever refreshKey changes.
@@ -977,7 +997,8 @@ function App() {
     // Account deleted on another device, or password reset by an admin
     socket.on('force-logout', () => clearSessionRef.current());
     socket.on('song-cleared', () => { setReceivedSong(null); setDashTick(t => t + 1); });
-    socket.on('song-rated', applyRating);
+    // Ratings change the match %, which comes with the friends list
+    socket.on('song-rated', (u) => { applyRating(u); loadFriends(); });
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
     socket.on('send-success', () => { setSent(true); setTimeout(() => { setSent(false); setSongLink(''); }, 1500); });
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
@@ -1649,6 +1670,7 @@ function App() {
                       ? `${history.length} song${history.length > 1 ? 's' : ''} swapped · last ${timeAgo(history[0].sentAt)}`
                       : 'No songs swapped yet — send the first one'}
                   </p>
+                  <MatchLine match={friends.find(f => f.friendship_id === activeFriendship.friendship_id)?.match} />
                 </div>
               </div>
               <div id="song-swap-main">

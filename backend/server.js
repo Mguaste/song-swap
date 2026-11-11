@@ -771,8 +771,58 @@ app.get('/api/friends', requireAuth, async (req, res) => {
      ORDER BY last_activity DESC, friend_name`,
     [me[0].id]
   );
-  res.json(rows);
+  const { rows: songs } = await pool.query(
+    'SELECT friendship_id, sent_by, artist, rating FROM song_history WHERE friendship_id = ANY($1::int[])',
+    [rows.map(r => r.friendship_id)]
+  );
+  const byFriendship = {};
+  for (const s of songs) (byFriendship[s.friendship_id] ??= []).push(s);
+  res.json(rows.map(r => ({ ...r, match: compatibility(byFriendship[r.friendship_id] ?? [], req.session.user.name) })));
 });
+
+// ── Compatibility ──
+// Only uses songs from this one swap. 80% from how you rate each other's
+// songs (1★ = 0, 5★ = 100), 20% from overlap in the artists you each send.
+const MATCH_MIN_SONGS = 5;
+const MATCH_MIN_RATINGS = 2;
+// "A feat. B", "A, B", "A & B", "A x B", "A with B" -> separate artists
+const ARTIST_SEPARATORS = /\s*(?:,|&|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b)\s*|\s+x\s+/i;
+const splitArtists = (artist) => (artist || '')
+  .toLowerCase()
+  .split(ARTIST_SEPARATORS)
+  .map(a => a.trim())
+  .filter(Boolean);
+const compatibility = (songs, me) => {
+  const rated = songs.filter(s => s.rating);
+  const need = Math.max(MATCH_MIN_SONGS - songs.length, 0);
+  if (need > 0 || rated.length < MATCH_MIN_RATINGS) {
+    return { ready: false, songsNeeded: need, ratingsNeeded: Math.max(MATCH_MIN_RATINGS - rated.length, 0) };
+  }
+  const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  // Ratings are given by the recipient: songs they sent carry your ratings
+  const youGive = avg(rated.filter(s => s.sent_by !== me).map(s => s.rating));
+  const theyGive = avg(rated.filter(s => s.sent_by === me).map(s => s.rating));
+  const sides = [youGive, theyGive].filter(x => x !== null);
+  const ratingScore = (avg(sides) - 1) / 4;
+
+  const mineArtists = new Map(), theirArtists = new Map(); // lowercase -> display name
+  for (const s of songs) {
+    const target = s.sent_by === me ? mineArtists : theirArtists;
+    const display = (s.artist || '').split(ARTIST_SEPARATORS).map(a => a.trim()).filter(Boolean);
+    splitArtists(s.artist).forEach((a, i) => { if (!target.has(a)) target.set(a, display[i] ?? a); });
+  }
+  const shared = [...mineArtists.keys()].filter(a => theirArtists.has(a));
+  const smaller = Math.min(mineArtists.size, theirArtists.size);
+  const artistScore = smaller ? shared.length / smaller : 0;
+
+  return {
+    ready: true,
+    percent: Math.round(100 * (0.8 * ratingScore + 0.2 * artistScore)),
+    youGive: youGive && Math.round(youGive * 10) / 10,
+    theyGive: theyGive && Math.round(theyGive * 10) / 10,
+    sharedArtists: shared.slice(0, 3).map(a => mineArtists.get(a)),
+  };
+};
 
 // Song history for a specific friendship
 // Latest activity per friendship (most recent song NOT sent by current user),

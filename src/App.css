@@ -2083,3 +2083,7 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 .swap-header-text { min-width: 0; }
 .swap-header-sub { margin: 3px 0 0; color: #888; font-size: 0.84rem; }
 .friend-avatar.avatar-swap { width: 52px; height: 52px; font-size: 1.3rem; }
+
+.match-line { margin: 4px 0 0; font-size: 0.84rem; color: #b3b3b3; }
+.match-line strong { color: #10B981; font-weight: 700; }
+.match-line.pending { color: #666; font-size: 0.8rem; }

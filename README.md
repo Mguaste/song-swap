@@ -31,7 +31,7 @@ https://ko-fi.com/mguaste
 
 ### stretch Goals
 * [x] overview screen — home dashboard (stats/streaks still open, see Future ideas)
-* [x] song rating (1–5 stars, recipient only) — liked list done (dashboard); compatibility still open
+* [x] song rating (1–5 stars, recipient only) — liked list (dashboard) + compatibility % (swap header)
 * [x] default music app/compatibility. 
 
 ### elastigirl goal
@@ -59,6 +59,7 @@ https://ko-fi.com/mguaste
 * [x] Home dashboard: greeting + daily progress ring + reset countdown, new for you, today with each friend, requests, rate what you got, invite nudge, your numbers, recent swaps, songs you loved (logo = Home; phones open on it)
 * [x] Fixes: logging out no longer passes the open swap to the next login; deploys no longer bring back old "current" songs
 * [x] Profile pictures (friends-only, resized to 256px) + change username (once every 7 days)
+* [x] Compatibility: "75% match" per friend (80% mutual ratings, 20% shared artists; needs 5 songs + 2 ratings)
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.
