@@ -11,7 +11,17 @@ const path = require('path');
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+// Railway's Postgres needs SSL; a local dev database usually doesn't have it
+const isLocalDb = (() => {
+  try {
+    const host = new URL(process.env.DATABASE_URL || '').hostname;
+    return ['', 'localhost', '127.0.0.1', '::1', '[::1]'].includes(host);
+  } catch { return false; }
+})();
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: isLocalDb ? false : { rejectUnauthorized: false },
+});
 
 // song_history row → the shape the frontend uses
 const rowToEntry = (r) => ({
@@ -165,6 +175,9 @@ app.use((req, res, next) => {
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(bodyParser.json());
+if (!process.env.SESSION_SECRET) {
+  console.warn('WARNING: SESSION_SECRET is not set — session cookies are not properly signed. Set it in .env (local) or Railway variables.');
+}
 const sessionMiddleware = session({
   // Sessions live in Postgres so deploys/restarts don't log everyone out
   store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: true }),

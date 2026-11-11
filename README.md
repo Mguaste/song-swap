@@ -4,6 +4,12 @@ https://ko-fi.com/mguaste
 
 # Song Swap
 
+### Local development
+1. Install and start Postgres, then create a database: `createdb songswap`
+2. `cp .env.example .env` and set `SESSION_SECRET` (e.g. `openssl rand -hex 32`)
+3. `npm install`, then `npm run dev` from the repo root (frontend on http://localhost:5173)
+4. Register an account in the app. Tables are created on first start; SSL is off for localhost databases.
+
 //### Client-Requirements:
 //* [x] must be able to paste Spotify link 
 //* [x] Must Use SSL certificate for use at work
@@ -74,6 +80,7 @@ Data check (Nov 2026): 21 users but only 3 friendships, so the most important wo
 **Infra / safety net**
 * [ ] Turn on Railway Postgres backups
 * [ ] Separate test database so changes can be tested for real before pushing
-* [ ] Railway CLI access for reading deploy logs
+* [x] Railway CLI access for reading deploy logs
+* [x] Local development setup (local Postgres + `.env.example`)
 * [ ] Optional: Spotify API credentials (exact Spotify links + ISRC for everything; needs Spotify Premium on the dev account)
 
