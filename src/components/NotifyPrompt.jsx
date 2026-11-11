@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react';
-import { pushStatus, enablePush } from '../lib/push';
+import { pushStatus, enablePush, willRestorePush } from '../lib/push';
 
 const DISMISS_KEY = 'ss_notify_prompt_dismissed';
 const dismissed = () => { try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch { return false; } };
 
 // Dashboard card nudging you to turn on notifications (or install on iPhone)
-export function NotifyPrompt() {
+export function NotifyPrompt({ userId }) {
   const [status, setStatus] = useState(null);
   const [hidden, setHidden] = useState(dismissed);
   const [error, setError] = useState('');
   useEffect(() => { pushStatus().then(setStatus); }, []);
 
-  if (hidden || (status !== 'off' && status !== 'ios-install')) return null;
+  if (hidden || willRestorePush(userId) || (status !== 'off' && status !== 'ios-install')) return null;
   const dismiss = () => { try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* ignore */ } setHidden(true); };
   const enable = async () => {
     setError('');
-    try { await enablePush(); } catch (e) { setError(e.message); }
+    try { await enablePush(userId); } catch (e) { setError(e.message); }
     setStatus(await pushStatus());
   };
 

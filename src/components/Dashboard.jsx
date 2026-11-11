@@ -83,7 +83,7 @@ export function Dashboard({ user, friends, friendCount, friendRequests, sentRequ
         {today.length > 0 && <ProgressRing done={sentToday} total={today.length} />}
       </header>
 
-      <NotifyPrompt />
+      <NotifyPrompt key={user.id} userId={user.id} />
 
       {pendingShare && (
         <div className="dash-card dash-share">

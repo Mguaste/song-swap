@@ -10,7 +10,7 @@ const MESSAGES = {
 };
 
 // Settings → Notifications (per device)
-export function NotificationSettings() {
+export function NotificationSettings({ userId }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -19,7 +19,7 @@ export function NotificationSettings() {
   const toggle = async () => {
     setBusy(true); setError('');
     try {
-      if (status === 'on') await disablePush(); else await enablePush();
+      if (status === 'on') await disablePush({ userId, forget: true }); else await enablePush(userId);
     } catch (e) { setError(e.message || 'Something went wrong'); }
     setStatus(await pushStatus());
     setBusy(false);

@@ -20,13 +20,22 @@ export const pushStatus = async () => {
   return sub && Notification.permission === 'granted' ? 'on' : 'off';
 };
 
+// Per device and account: did this user turn notifications on here? Logging
+// out turns them off, and this lets logging back in restore them silently.
+const wantKey = (userId) => `ss_push_wanted_${userId}`;
+const setWanted = (userId, on) => {
+  if (!userId) return;
+  try { if (on) localStorage.setItem(wantKey(userId), '1'); else localStorage.removeItem(wantKey(userId)); } catch { /* ignore */ }
+};
+const isWanted = (userId) => { try { return localStorage.getItem(wantKey(userId)) === '1'; } catch { return false; } };
+
 const urlBase64ToUint8Array = (base64) => {
   const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
 };
 
 // Must be called from a tap/click (browsers require it for the permission prompt)
-export const enablePush = async () => {
+export const enablePush = async (userId) => {
   const { publicKey } = await fetch('/api/push/key').then(r => r.json());
   if (!publicKey) throw new Error('Notifications aren\'t set up on the server yet');
   const permission = await Notification.requestPermission();
@@ -41,10 +50,25 @@ export const enablePush = async () => {
     body: JSON.stringify({ subscription: sub.toJSON() }),
   });
   if (!r.ok) throw new Error('Could not save the subscription');
+  setWanted(userId, true);
 };
 
-// Turn off for this device (also used on logout)
-export const disablePush = async () => {
+// True when restorePush will switch notifications back on by itself
+export const willRestorePush = (userId) =>
+  isWanted(userId) && 'Notification' in window && Notification.permission === 'granted';
+
+// After logging in: if this user had notifications on here and the browser
+// already allows them, turn them back on without asking
+export const restorePush = async (userId) => {
+  if (!isWanted(userId) || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try { await enablePush(userId); } catch { /* stays off; Settings shows the toggle */ }
+};
+
+// Turn off for this device. forget = the user switched it off (not just a
+// logout), so don't bring it back on next login.
+export const disablePush = async ({ userId, forget = false } = {}) => {
+  if (forget) setWanted(userId, false);
   if (!('serviceWorker' in navigator)) return;
   const reg = await navigator.serviceWorker.getRegistration();
   const sub = await reg?.pushManager?.getSubscription();

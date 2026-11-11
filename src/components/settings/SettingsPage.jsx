@@ -39,7 +39,7 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
         <h2 className="settings-section-title">Notifications</h2>
         <div className="settings-row">
           <label className="settings-label">This Device</label>
-          <NotificationSettings />
+          <NotificationSettings userId={user.id} />
         </div>
       </div>
 

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
 import { readPendingInvite, clearPendingInvite, readPendingShare, clearPendingShare, readPendingSwap } from './lib/pending';
-import { registerServiceWorker, disablePush } from './lib/push';
+import { registerServiceWorker, disablePush, restorePush } from './lib/push';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -520,6 +520,7 @@ function App() {
   useEffect(() => {
     userRef.current = user;
     if (!user) return;
+    restorePush(user.id);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadFriends();
     loadRequests();
