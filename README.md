@@ -13,7 +13,7 @@ https://ko-fi.com/mguaste
 //* [ ]Auto upload to Spotify Playlist -# may be optional/ not forced because of various service integration
 
 ### Immediate needs
-* landing page
+* [x] landing page
 
 ### user feedback/bugs/fixes
 * [x] Clear URL after send!!!
@@ -42,6 +42,8 @@ https://ko-fi.com/mguaste
 * [x] Star ratings
 * [x] Onboarding screen for new users + sent requests list
 * [x] Removed leftover Spotify tokens from the DB
+* [x] Easier to leave Settings (Back link, highlighted gear, Esc, picking a friend closes it)
+* [x] Unread count in the tab title + red favicon pip, updating live
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.
