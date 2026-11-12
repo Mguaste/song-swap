@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { readPendingSource } from '../lib/pending';
 
 export function LoginForm({ onLogin }) {
   const [name, setName] = useState('');
@@ -41,7 +42,7 @@ export function RegisterForm({ onLogin }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ name, password, preferredPlatform }),
+      body: JSON.stringify({ name, password, preferredPlatform, ref: readPendingSource().via }),
     });
     if (res.ok) onLogin();
     else setError((await res.json()).error || 'Registration failed');

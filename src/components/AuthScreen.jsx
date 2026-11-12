@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import icon from '../assets/SSLogo.png';
+import { readPendingSource } from '../lib/pending';
 import { LoginForm, RegisterForm } from './AuthForms';
 
 export function AuthScreen({ authMode, onModeChange, pendingInvite, onLoggedIn, onBack }) {
   const [inviter, setInviter] = useState(null);
   useEffect(() => {
     if (!pendingInvite) return;
-    fetch(`/api/invite/${encodeURIComponent(pendingInvite)}`)
+    const src = readPendingSource().via === 'share' ? '?src=share' : '';
+    fetch(`/api/invite/${encodeURIComponent(pendingInvite)}${src}`)
       .then(r => (r.ok ? r.json() : null))
       .then(d => setInviter(d?.name ?? null))
       .catch(() => {});

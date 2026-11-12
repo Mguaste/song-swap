@@ -121,6 +121,21 @@ const initDb = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  // Where a friend request came from: 'code' (typed), 'invite' (/add link) or
+  // 'share' (swap back from a /s song link; share_id says which). NULL = made
+  // before this was tracked. accepted_at feeds the admin Growth numbers.
+  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS source TEXT');
+  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS share_id TEXT REFERENCES song_shares(id) ON DELETE SET NULL');
+  await pool.query('ALTER TABLE friendships ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ');
+  // Daily totals for the admin Growth numbers. Counts only: no user ids or IPs.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS daily_counts (
+      day DATE NOT NULL,
+      event TEXT NOT NULL,
+      count INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, event)
+    )
+  `);
   // When each user last looked at each swap, so unread status follows the
   // account across devices instead of living in one browser's localStorage
   await pool.query(`
@@ -378,6 +393,36 @@ const requireAuth = (req, res, next) => {
   res.status(401).json({ error: 'Not authenticated' });
 };
 
+// Bump today's total for an event (admin Growth numbers). Never blocks or
+// fails the request it's counting.
+const countEvent = (event) => {
+  pool.query(
+    `INSERT INTO daily_counts (day, event, count) VALUES ((NOW() AT TIME ZONE $2)::date, $1, 1)
+     ON CONFLICT (day, event) DO UPDATE SET count = daily_counts.count + 1`,
+    [event, RESET_TIMEZONE]
+  ).catch(err => console.error('countEvent failed:', err.message));
+};
+
+// A friendship that started from a shared song begins with that song in its
+// history, sent by the person who shared it (so the new friend can rate it)
+const seedSharedSong = async (friendshipId) => {
+  try {
+    await pool.query(
+      `INSERT INTO song_history
+         (title, artist, album, album_art, spotify_uri, spotify_url, platform_links, source_url, sent_by, friendship_id, sent_at)
+       SELECT s.title, s.artist, s.album, s.album_art,
+              s.platform_links->'spotify'->>'nativeAppUriMobile', s.platform_links->'spotify'->>'url',
+              s.platform_links, s.source_url, u.name, f.id, s.created_at
+       FROM friendships f
+       JOIN song_shares s ON s.id = f.share_id
+       JOIN users u ON u.id = s.user_id
+       WHERE f.id = $1 AND s.user_id IN (f.requester_id, f.receiver_id)
+         AND NOT EXISTS (SELECT 1 FROM song_history h WHERE h.friendship_id = f.id)`,
+      [friendshipId]
+    );
+  } catch (err) { console.error('seedSharedSong failed:', err.message); }
+};
+
 const requireAdmin = async (req, res, next) => {
   if (req.session.user) {
     const { rows } = await pool.query('SELECT is_admin FROM users WHERE name = $1', [req.session.user.name]);
@@ -404,7 +449,7 @@ setInterval(() => {
 }, AUTH_WINDOW_MS).unref();
 
 app.post('/api/register', authLimiter, async (req, res) => {
-  const { name, password, preferredPlatform } = req.body;
+  const { name, password, preferredPlatform, ref } = req.body;
   const trimmed = name?.trim();
   if (!trimmed || !password) return res.status(400).json({ error: 'Name and password required' });
   if (trimmed.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
@@ -429,6 +474,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
     [trimmed, passwordHash, code, platform]
   );
   req.session.user = { name: trimmed };
+  if (ref === 'invite' || ref === 'share') countEvent(`signup_${ref}`);
   res.status(201).json({ name: trimmed });
 });
 
@@ -534,6 +580,41 @@ app.delete('/api/me', requireAuth, authLimiter, async (req, res) => {
 
 // Admin: give a user a temporary password (there's no email on file to send
 // a reset link to). Signs them out everywhere.
+// Admin Growth numbers: is anyone using invite and song links, and do they
+// turn into friendships? Last 7 days, last 30 days, all time.
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+  const tz = RESET_TIMEZONE;
+  const [counts, users, friends] = await Promise.all([
+    pool.query(
+      `SELECT event,
+         COALESCE(SUM(count) FILTER (WHERE day > (NOW() AT TIME ZONE $1)::date - 7), 0)::int AS week,
+         COALESCE(SUM(count) FILTER (WHERE day > (NOW() AT TIME ZONE $1)::date - 30), 0)::int AS month,
+         SUM(count)::int AS total
+       FROM daily_counts GROUP BY event`, [tz]),
+    pool.query(
+      `SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS week,
+              COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::int AS month,
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE EXISTS (
+                SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND users.id IN (f.requester_id, f.receiver_id)))::int AS with_friend
+       FROM users`),
+    pool.query(
+      `SELECT COALESCE(source, 'untracked') AS source,
+              COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS requests_week,
+              COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::int AS requests_month,
+              COUNT(*)::int AS requests_total,
+              COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '7 days')::int AS accepted_week,
+              COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '30 days')::int AS accepted_month,
+              COUNT(*) FILTER (WHERE status = 'accepted')::int AS accepted_total
+       FROM friendships GROUP BY 1`),
+  ]);
+  res.json({
+    events: Object.fromEntries(counts.rows.map(r => [r.event, r])),
+    users: users.rows[0],
+    friendships: Object.fromEntries(friends.rows.map(r => [r.source, r])),
+  });
+});
+
 app.post('/api/admin/reset-password', requireAdmin, async (req, res) => {
   const target = String(req.body?.name ?? '').trim();
   if (!target) return res.status(400).json({ error: 'Enter a username' });
@@ -751,6 +832,8 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/invite/:code', authLimiter, async (req, res) => {
   const name = await inviterName(req.params.code);
   if (!name) return res.status(404).json({ error: 'Invite not found' });
+  // ?src=share: the sign-up screen after "swap back" on a song (counted as a share open)
+  if (req.query.src !== 'share' && req.session.user?.name !== name) countEvent('invite_opened');
   res.json({ name });
 });
 
@@ -778,6 +861,7 @@ const loadShare = async (id) => {
 app.get('/api/shares/:id', async (req, res) => {
   const r = await loadShare(req.params.id);
   if (!r) return res.status(404).json({ error: 'This song link has expired or doesn\'t exist' });
+  if (req.session.user?.name !== r.from_name) countEvent('share_opened');
   res.json({
     from: { id: r.from_id, name: r.from_name, code: r.from_code, avatarAt: r.from_avatar_at },
     song: { title: r.title, artist: r.artist, album: r.album, albumArt: r.album_art, platformLinks: r.platform_links },
@@ -788,7 +872,7 @@ app.get('/api/shares/:id', async (req, res) => {
 // Add a friend by code (typed or from an invite link): sends a request the
 // other person accepts. If they already asked you, this accepts theirs.
 app.post('/api/friends/add', requireAuth, async (req, res) => {
-  const { friendCode } = req.body;
+  const { friendCode, via, shareId } = req.body;
   if (!friendCode) return res.status(400).json({ error: 'Friend code required' });
 
   const { rows: target } = await pool.query('SELECT id, name FROM users WHERE friend_code = $1', [String(friendCode).toUpperCase()]);
@@ -810,14 +894,25 @@ app.post('/api/friends/add', requireAuth, async (req, res) => {
   if (prior?.status === 'accepted') return res.status(409).json({ error: `You and ${theirName} are already friends` });
   // They already sent you a request: adding them back accepts it
   if (prior && prior.requester_id === theirId) {
-    await pool.query("UPDATE friendships SET status = 'accepted' WHERE id = $1", [prior.id]);
+    await pool.query("UPDATE friendships SET status = 'accepted', accepted_at = NOW() WHERE id = $1", [prior.id]);
+    await seedSharedSong(prior.id);
     io.to(`user-${myName}`).emit('friendship-accepted');
     io.to(`user-${theirName}`).emit('friendship-accepted');
     return res.status(201).json({ message: `You and ${theirName} are now friends`, friendshipId: prior.id, accepted: true });
   }
   if (prior) return res.status(409).json({ error: `You already sent ${theirName} a friend request` });
 
-  await pool.query('INSERT INTO friendships (requester_id, receiver_id) VALUES ($1, $2)', [myId, theirId]);
+  // Only keep a share id that really is a song the other person shared
+  let fromShare = null;
+  if (via === 'share' && typeof shareId === 'string') {
+    const { rows } = await pool.query('SELECT id FROM song_shares WHERE id = $1 AND user_id = $2', [shareId, theirId]);
+    fromShare = rows[0]?.id ?? null;
+  }
+  const source = fromShare ? 'share' : via === 'invite' ? 'invite' : 'code';
+  await pool.query(
+    'INSERT INTO friendships (requester_id, receiver_id, source, share_id) VALUES ($1, $2, $3, $4)',
+    [myId, theirId, source, fromShare]
+  );
   io.to(`user-${target[0].name}`).emit('friend-request-received');
   sendPush(target[0].name, {
     title: 'New friend request',
@@ -858,10 +953,11 @@ app.get('/api/friends/requests', requireAuth, async (req, res) => {
 app.post('/api/friends/accept/:id', requireAuth, async (req, res) => {
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
   const { rows } = await pool.query(
-    "UPDATE friendships SET status = 'accepted' WHERE id = $1 AND receiver_id = $2 AND status = 'pending' RETURNING *",
+    "UPDATE friendships SET status = 'accepted', accepted_at = NOW() WHERE id = $1 AND receiver_id = $2 AND status = 'pending' RETURNING *",
     [req.params.id, me[0].id]
   );
   if (rows.length === 0) return res.status(404).json({ error: 'Request not found' });
+  await seedSharedSong(rows[0].id);
   // Notify both users so their friend lists update in real time
   const { rows: requester } = await pool.query('SELECT name FROM users WHERE id = $1', [rows[0].requester_id]);
   const { rows: receiver } = await pool.query('SELECT name FROM users WHERE id = $1', [rows[0].receiver_id]);
@@ -1714,6 +1810,7 @@ app.post('/api/shares', requireAuth, async (req, res) => {
   if (song.error) return res.status(song.status).json({ error: song.error });
   entry.count++;
   shareCounts.set(me[0].id, entry);
+  countEvent('share_created');
 
   const id = newShareId();
   await pool.query(

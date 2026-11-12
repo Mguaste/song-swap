@@ -2216,3 +2216,20 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 .shared-cta-btn:hover { filter: brightness(1.1); }
 .shared-cta .shared-fine { margin: 10px 0 0; color: #777; font-size: 0.78rem; }
 .shared-error { color: #ccc; margin: 16px 0 20px; }
+
+/* ── Settings → Admin → Growth ── */
+
+.settings-row.settings-row-block { flex-direction: column; align-items: stretch; gap: 10px; }
+.growth { display: flex; flex-direction: column; gap: 10px; }
+.growth-headline { margin: 0; color: #ccc; font-size: 0.9rem; }
+.growth-headline strong { color: #10B981; font-size: 1.1rem; }
+.growth-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.growth-table th, .growth-table td { padding: 5px 6px; text-align: right; font-weight: 400; }
+.growth-table th:first-child { text-align: left; color: #ccc; }
+.growth-table thead th { color: #777; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.growth-table td { color: #fff; }
+.growth-table tbody tr:not(.growth-group) { border-top: 1px solid #242424; }
+.growth-group th { padding-top: 14px; color: #10B981 !important; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.growth-sub th { padding-left: 16px; color: #999 !important; }
+.growth-sub td { color: #aaa; }
+.growth-note { margin: 0; color: #666; font-size: 0.76rem; }

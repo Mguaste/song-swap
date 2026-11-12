@@ -1,19 +1,32 @@
 // /add/ABC123 invite links: remember the code (survives sign-up/log-in), then
 // clean the URL. The code is turned into a friend request once logged in.
 const INVITE_KEY = 'ss_pending_invite';
+// Where the pending invite came from: { via: 'invite' } or { via: 'share', shareId }
+const SOURCE_KEY = 'ss_pending_source';
 export const readPendingInvite = () => {
   const m = window.location.pathname.match(/^\/add\/([A-Za-z0-9]{6})\/?$/);
   try {
     if (m) {
       sessionStorage.setItem(INVITE_KEY, m[1].toUpperCase());
+      sessionStorage.setItem(SOURCE_KEY, JSON.stringify({ via: 'invite' }));
       window.history.replaceState(null, '', '/');
     }
     return sessionStorage.getItem(INVITE_KEY);
   } catch { return m ? m[1].toUpperCase() : null; }
 };
-export const clearPendingInvite = () => { try { sessionStorage.removeItem(INVITE_KEY); } catch { /* ignore */ } };
+export const readPendingSource = () => {
+  try { return JSON.parse(sessionStorage.getItem(SOURCE_KEY)) ?? {}; } catch { return {}; }
+};
+export const clearPendingInvite = () => {
+  try { sessionStorage.removeItem(INVITE_KEY); sessionStorage.removeItem(SOURCE_KEY); } catch { /* ignore */ }
+};
 // "Swap back" on a shared song turns into an invite from the sender
-export const savePendingInvite = (code) => { try { sessionStorage.setItem(INVITE_KEY, code.toUpperCase()); } catch { /* ignore */ } };
+export const savePendingInvite = (code, shareId) => {
+  try {
+    sessionStorage.setItem(INVITE_KEY, code.toUpperCase());
+    sessionStorage.setItem(SOURCE_KEY, JSON.stringify({ via: 'share', shareId }));
+  } catch { /* ignore */ }
+};
 
 // /s/<id> song share links: shown as their own page (the URL stays, so a
 // refresh keeps working) until the visitor moves on

@@ -64,6 +64,8 @@ https://ko-fi.com/mguaste
 * [x] SEO: structured data, canonical URLs, share image, crawlable homepage text, "What is a song swap?" page (`/what-is-a-song-swap`)
 * [x] Invite links show who invited you + personal link previews; adding someone who already asked you accepts it
 * [x] Song share links (`/s/<id>`): send one song to anyone, no account needed to listen; "swap back" sends a friend request
+* [x] Swapping back from a song link starts the swap with that song in history
+* [x] Admin Growth numbers (Settings → Admin): sign-ups, link opens, friend requests and accepts by source; daily totals only
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

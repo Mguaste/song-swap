@@ -2,7 +2,7 @@ import './App.css';
 import { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
-import { readPendingInvite, clearPendingInvite, savePendingInvite, readPendingShare, clearPendingShare, readPendingSwap, readShareLinkId } from './lib/pending';
+import { readPendingInvite, readPendingSource, clearPendingInvite, savePendingInvite, readPendingShare, clearPendingShare, readPendingSwap, readShareLinkId } from './lib/pending';
 import { registerServiceWorker, disablePush, restorePush } from './lib/push';
 import { buildSearchUrl } from './lib/platforms';
 import { Header } from './components/Header';
@@ -283,8 +283,9 @@ function App() {
     socket.emit('send-song', { song: songDetails, friendshipId: activeFriendship.friendship_id });
   };
 
-  // Called with a code (from an invite link) or from the Add button (uses the input)
-  const addFriend = async (codeArg) => {
+  // Called with a code (from an invite or song link; source says which, for
+  // the shared song and the Growth numbers) or from the Add button (uses the input)
+  const addFriend = async (codeArg, source = {}) => {
     const code = typeof codeArg === 'string' ? codeArg : addCodeInput;
     setAddCodeError('');
     setAddCodeSuccess('');
@@ -292,7 +293,7 @@ function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ friendCode: code }),
+      body: JSON.stringify({ friendCode: code, via: source.via, shareId: source.shareId }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) { setAddCodeError(data.error || 'Could not add that friend'); return; }
@@ -534,11 +535,12 @@ function App() {
       });
     }
     if (pendingInvite) {
+      const source = readPendingSource();
       clearPendingInvite();
       setPendingInvite(null);
       if (pendingInvite !== user.friend_code) {
         setSidebarOpen(true);
-        addFriend(pendingInvite);
+        addFriend(pendingInvite, source);
       }
     }
     // The socket connects at page load, possibly before login, so reconnect to
@@ -644,9 +646,9 @@ function App() {
     if (!swapWith || swapWith.id === user?.id) return;
     if (user) {
       setSidebarOpen(true);
-      addFriend(swapWith.code);
+      addFriend(swapWith.code, { via: 'share', shareId: sharedSongId });
     } else {
-      savePendingInvite(swapWith.code);
+      savePendingInvite(swapWith.code, sharedSongId);
       setPendingInvite(swapWith.code.toUpperCase());
       setAuthMode('register');
       setShowAuth(true);

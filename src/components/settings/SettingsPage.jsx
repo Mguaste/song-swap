@@ -2,6 +2,7 @@ import { ProfileSettings } from './ProfileSettings';
 import { ChangePassword } from './ChangePassword';
 import { DeleteAccount } from './DeleteAccount';
 import { AdminResetPassword } from './AdminResetPassword';
+import { AdminGrowth } from './AdminGrowth';
 import { NotificationSettings } from './NotificationSettings';
 import { PLATFORMS } from '../../lib/platforms';
 
@@ -43,6 +44,10 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
       {user.is_admin && (
         <div className="settings-section" id="settings-admin">
           <h2 className="settings-section-title">Admin</h2>
+          <div className="settings-row settings-row-block">
+            <label className="settings-label">Growth</label>
+            <AdminGrowth />
+          </div>
           <div className="settings-row">
             <label className="settings-label">History</label>
             <button className="settings-danger-btn" onClick={() => fetch('/api/admin/history', { method: 'DELETE', credentials: 'include' })}>Clear All History</button>
