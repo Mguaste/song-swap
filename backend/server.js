@@ -205,6 +205,14 @@ const scheduleMidnightClear = () => {
   }, 60 * 1000).unref();
 };
 
+// One canonical host for search engines: www.song-swap.app → song-swap.app
+app.use((req, res, next) => {
+  if (req.hostname === 'www.song-swap.app') {
+    return res.redirect(301, `https://song-swap.app${req.originalUrl}`);
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
