@@ -77,7 +77,6 @@ export function Sidebar({
           )}
 
           <div className="sidebar-section sidebar-friends">
-            <p className="sidebar-label">Friends</p>
             <div
               className={`friend-item dashboard-item${dashboardActive ? ' active' : ''}`}
               onClick={onDashboard}
@@ -90,6 +89,7 @@ export function Sidebar({
               </span>
               <span className="friend-name">Dashboard</span>
             </div>
+            <p className="sidebar-label">Friends</p>
             {friends.length === 0 ? (
               <p className="empty-msg">No friends yet</p>
             ) : (
