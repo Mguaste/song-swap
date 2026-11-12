@@ -1150,7 +1150,8 @@ if (fs.existsSync(DIST)) {
     // sw.js too, so service worker updates are picked up promptly
     if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
   };
-  app.use(express.static(DIST, { dotfiles: 'allow', setHeaders: noCacheHtml }));
+  // extensions: /what-is-a-song-swap serves what-is-a-song-swap.html
+  app.use(express.static(DIST, { dotfiles: 'allow', extensions: ['html'], setHeaders: noCacheHtml }));
   app.get('/{*path}', (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(DIST, 'index.html'));

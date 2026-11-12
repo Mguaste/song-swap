@@ -133,6 +133,7 @@ export function LandingPage({ onLogin, onSignup }) {
         <div className="landing-footer-row">
           <span>© 2026 Song Swap</span>
           <nav className="landing-footer-links">
+            <a href="/what-is-a-song-swap">What is a song swap?</a>
             <a href="/privacy.html">Privacy</a>
             <a href="/terms.html">Terms</a>
             <a href="https://github.com/Mguaste/song-swap" target="_blank" rel="noreferrer">GitHub</a>
