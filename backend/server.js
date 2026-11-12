@@ -107,6 +107,20 @@ const initDb = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  // Song share links (/s/<id>): one song sent to anyone, account or not
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS song_shares (
+      id TEXT PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT,
+      artist TEXT,
+      album TEXT,
+      album_art TEXT,
+      platform_links JSONB,
+      source_url TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
   // When each user last looked at each swap, so unread status follows the
   // account across devices instead of living in one browser's localStorage
   await pool.query(`
@@ -746,6 +760,31 @@ const inviterName = async (code) => {
   return rows[0]?.name ?? null;
 };
 
+const loadShare = async (id) => {
+  if (!/^[A-Za-z0-9]{10}$/.test(id ?? '')) return null;
+  const { rows } = await pool.query(
+    `SELECT s.title, s.artist, s.album, s.album_art, s.platform_links, s.created_at,
+            u.id AS from_id, u.name AS from_name, u.friend_code AS from_code, a.updated_at AS from_avatar_at
+     FROM song_shares s JOIN users u ON u.id = s.user_id
+     LEFT JOIN user_avatars a ON a.user_id = u.id
+     WHERE s.id = $1`,
+    [id]
+  );
+  return rows[0] ?? null;
+};
+
+// Public: the shared song and who sent it (their friend code, so the page
+// can send them a friend request; sharing the link shares the code)
+app.get('/api/shares/:id', async (req, res) => {
+  const r = await loadShare(req.params.id);
+  if (!r) return res.status(404).json({ error: 'This song link has expired or doesn\'t exist' });
+  res.json({
+    from: { id: r.from_id, name: r.from_name, code: r.from_code, avatarAt: r.from_avatar_at },
+    song: { title: r.title, artist: r.artist, album: r.album, albumArt: r.album_art, platformLinks: r.platform_links },
+    sentAt: r.created_at,
+  });
+});
+
 // Add a friend by code (typed or from an invite link): sends a request the
 // other person accepts. If they already asked you, this accepts theirs.
 app.post('/api/friends/add', requireAuth, async (req, res) => {
@@ -1178,22 +1217,46 @@ if (fs.existsSync(DIST)) {
   };
   // extensions: /what-is-a-song-swap serves what-is-a-song-swap.html
   app.use(express.static(DIST, { dotfiles: 'allow', extensions: ['html'], setHeaders: noCacheHtml }));
-  // Invite links get a personal link preview ("Marcus invited you…") and stay
-  // out of search results
-  const escapeHtml = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Invite and song-share links get a personal link preview ("Marcus invited
+  // you…", "Marcus sent you a song") and stay out of search results
+  const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const sendPreviewPage = (res, { title, desc, url, image }) => {
+    const t = escapeHtml(title), d = escapeHtml(desc);
+    let html = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
+      .replace(/(<meta (?:property|name)="(?:og|twitter):title" content=")[^"]*/g, (_, tag) => tag + t)
+      .replace(/(<meta (?:property|name)="(?:og|twitter):description" content=")[^"]*/g, (_, tag) => tag + d)
+      .replace(/(<meta property="og:url" content=")[^"]*/, (_, tag) => tag + escapeHtml(url))
+      .replace('<head>', '<head>\n    <meta name="robots" content="noindex" />');
+    if (image) {
+      html = html
+        .replace(/(<meta (?:property|name)="(?:og|twitter):image" content=")[^"]*/g, (_, tag) => tag + escapeHtml(image))
+        .replace(/\s*<meta property="og:image:(?:width|height|alt)" content="[^"]*" \/>/g, '')
+        .replace('content="summary_large_image"', 'content="summary"'); // album art is square
+    }
+    res.setHeader('Cache-Control', 'no-cache');
+    res.type('html').send(html);
+  };
   app.get('/add/:code', async (req, res, next) => {
     try {
       const name = await inviterName(req.params.code);
       if (!name) return next();
-      const title = escapeHtml(`${name} invited you to Song Swap`);
-      const desc = escapeHtml(`Swap songs with ${name}, one track at a time. Works with Spotify, Apple Music, YouTube Music, and more.`);
-      const html = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
-        .replace(/(<meta (?:property|name)="(?:og|twitter):title" content=")[^"]*/g, (_, tag) => tag + title)
-        .replace(/(<meta (?:property|name)="(?:og|twitter):description" content=")[^"]*/g, (_, tag) => tag + desc)
-        .replace(/(<meta property="og:url" content=")[^"]*/, (_, tag) => `${tag}https://song-swap.app/add/${req.params.code.toUpperCase()}`)
-        .replace('<head>', '<head>\n    <meta name="robots" content="noindex" />');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.type('html').send(html);
+      sendPreviewPage(res, {
+        title: `${name} invited you to Song Swap`,
+        desc: `Swap songs with ${name}, one track at a time. Works with Spotify, Apple Music, YouTube Music, and more.`,
+        url: `https://song-swap.app/add/${req.params.code.toUpperCase()}`,
+      });
+    } catch (err) { next(err); }
+  });
+  app.get('/s/:id', async (req, res, next) => {
+    try {
+      const share = await loadShare(req.params.id);
+      if (!share) return next();
+      sendPreviewPage(res, {
+        title: `${share.from_name} sent you a song: ${share.title} — ${share.artist}`,
+        desc: `Listen on Spotify, Apple Music, YouTube Music, or whatever you use, then send ${share.from_name} a song back on Song Swap.`,
+        url: `https://song-swap.app/s/${req.params.id}`,
+        image: /^https:\/\//.test(share.album_art ?? '') ? share.album_art : null,
+      });
     } catch (err) { next(err); }
   });
   app.get('/{*path}', (req, res) => {
@@ -1541,18 +1604,19 @@ const searchYouTubeMusic = async (song) => {
   } catch { return null; }
 };
 
-app.post('/api/verify', requireAuth, async (req, res) => {
-  const { link } = req.body;
-  if (!link || typeof link !== 'string') return res.status(400).json({ error: 'Link required' });
+// Look up a pasted song link and find it on every platform.
+// Returns the song, or { status, error } when it can't.
+const resolveSong = async (link) => {
+  if (!link || typeof link !== 'string') return { status: 400, error: 'Link required' };
 
   let parsed = parseLink(link);
-  if (!parsed) return res.status(400).json({ error: 'Paste a Spotify, Apple Music, YouTube, Deezer, or Tidal song link' });
-  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  if (!parsed) return { status: 400, error: 'Paste a Spotify, Apple Music, YouTube, Deezer, or Tidal song link' };
+  if (parsed.error) return { status: 400, error: parsed.error };
 
   try {
     if (parsed.shortUrl) {
       const id = await resolveShortLink(parsed.shortUrl, parsed.pattern);
-      if (!id) return res.status(404).json({ error: 'Could not open that link — paste the full song link' });
+      if (!id) return { status: 404, error: 'Could not open that link — paste the full song link' };
       parsed = { platform: parsed.platform, id };
     }
 
@@ -1578,11 +1642,11 @@ app.post('/api/verify', requireAuth, async (req, res) => {
         break;
       case 'tidal':
         song = await lookupTidal(parsed.id);
-        if (song?.unavailable) return res.status(400).json({ error: "Tidal links can't be read yet — paste the song from another app" });
+        if (song?.unavailable) return { status: 400, error: "Tidal links can't be read yet — paste the song from another app" };
         if (song) platformLinks.tidal = { url: song.url };
         break;
     }
-    if (!song) return res.status(404).json({ error: 'Song not found' });
+    if (!song) return { status: 404, error: 'Song not found' };
 
     // 2. Spotify first: its API can supply the ISRC that makes the rest exact
     let spotifyId = parsed.platform === 'spotify' ? parsed.id : null;
@@ -1601,7 +1665,7 @@ app.post('/api/verify', requireAuth, async (req, res) => {
     const results = await Promise.all(missing.map(p => others[p](song)));
     missing.forEach((p, i) => { if (results[i]) platformLinks[p] = results[i]; });
 
-    res.json({
+    return {
       title: song.title,
       artist: song.artist,
       album: song.album,
@@ -1613,15 +1677,53 @@ app.post('/api/verify', requireAuth, async (req, res) => {
       // song.link's web pages still work; this URL format matches what Odesli
       // returned for Spotify input, so duplicate checks line up with old history.
       odesliPageUrl: spotifyId ? `https://song.link/s/${spotifyId}` : null,
-    });
+    };
   } catch (err) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      return res.status(504).json({ error: 'Music lookup timed out — try again' });
+      return { status: 504, error: 'Music lookup timed out — try again' };
     }
     console.error('Song lookup failed:', err);
-    res.status(502).json({ error: 'Music lookup failed — try again in a moment' });
+    return { status: 502, error: 'Music lookup failed — try again in a moment' };
   }
+};
+
+app.post('/api/verify', requireAuth, async (req, res) => {
+  const result = await resolveSong(req.body?.link);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
 });
+
+// ── Song share links ─────────────────────────────────────────────────────────
+// /s/<id>: send one song to anyone, even someone without an account. The page
+// plays it in their music app and invites them to swap back (a normal friend
+// request). The server looks the song up itself, so a share page only ever
+// shows real song details.
+const SHARE_ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+const newShareId = () => Array.from(crypto.randomBytes(10), b => SHARE_ID_CHARS[b % SHARE_ID_CHARS.length]).join('');
+const SHARES_PER_HOUR = 30;
+const shareCounts = new Map(); // userId → { count, start }
+
+app.post('/api/shares', requireAuth, async (req, res) => {
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  const now = Date.now();
+  const entry = shareCounts.get(me[0].id) ?? { count: 0, start: now };
+  if (now - entry.start > 60 * 60 * 1000) { entry.count = 0; entry.start = now; }
+  if (entry.count >= SHARES_PER_HOUR) return res.status(429).json({ error: 'Too many share links — try again later' });
+
+  const song = await resolveSong(req.body?.link);
+  if (song.error) return res.status(song.status).json({ error: song.error });
+  entry.count++;
+  shareCounts.set(me[0].id, entry);
+
+  const id = newShareId();
+  await pool.query(
+    `INSERT INTO song_shares (id, user_id, title, artist, album, album_art, platform_links, source_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, me[0].id, song.title, song.artist, song.album, song.albumArt, JSON.stringify(song.platformLinks), song.sourceUrl]
+  );
+  res.status(201).json({ id, url: `${req.protocol}://${req.get('host')}/s/${id}`, song });
+});
+
 
 initDb().then(async () => {
   // Restore today's current songs after a restart. Only songs sent since the

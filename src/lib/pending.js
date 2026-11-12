@@ -12,6 +12,12 @@ export const readPendingInvite = () => {
   } catch { return m ? m[1].toUpperCase() : null; }
 };
 export const clearPendingInvite = () => { try { sessionStorage.removeItem(INVITE_KEY); } catch { /* ignore */ } };
+// "Swap back" on a shared song turns into an invite from the sender
+export const savePendingInvite = (code) => { try { sessionStorage.setItem(INVITE_KEY, code.toUpperCase()); } catch { /* ignore */ } };
+
+// /s/<id> song share links: shown as their own page (the URL stays, so a
+// refresh keeps working) until the visitor moves on
+export const readShareLinkId = () => window.location.pathname.match(/^\/s\/([A-Za-z0-9]{10})\/?$/)?.[1] ?? null;
 
 // /share?url=…&text=… — sent by Android's share menu (installed app) or an
 // iPhone Shortcut. Keep the first link found (survives log-in), clean the URL,

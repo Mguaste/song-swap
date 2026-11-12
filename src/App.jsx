@@ -2,8 +2,9 @@ import './App.css';
 import { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
-import { readPendingInvite, clearPendingInvite, readPendingShare, clearPendingShare, readPendingSwap } from './lib/pending';
+import { readPendingInvite, clearPendingInvite, savePendingInvite, readPendingShare, clearPendingShare, readPendingSwap, readShareLinkId } from './lib/pending';
 import { registerServiceWorker, disablePush, restorePush } from './lib/push';
+import { buildSearchUrl } from './lib/platforms';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -11,12 +12,14 @@ import { Onboarding } from './components/Onboarding';
 import { SwapPage } from './components/SwapPage';
 import { LandingPage } from './components/LandingPage';
 import { AuthScreen } from './components/AuthScreen';
+import { SharedSongPage } from './components/SharedSongPage';
 import { SettingsPage } from './components/settings/SettingsPage';
 
 function App() {
   const [user, setUser] = useState(undefined);
   const [authMode, setAuthMode] = useState(() => (readPendingInvite() ? 'register' : 'login'));
   const [pendingInvite, setPendingInvite] = useState(readPendingInvite);
+  const [sharedSongId, setSharedSongId] = useState(readShareLinkId);
   const [pendingShare, setPendingShare] = useState(readPendingShare);
   const pendingShareRef = useRef(pendingShare);
   const clearSessionRef = useRef(() => {});
@@ -189,19 +192,6 @@ function App() {
   };
 
   const PLATFORM_PRIORITY = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal', 'deezer'];
-
-  const buildSearchUrl = (platform, title, artist) => {
-    const q = encodeURIComponent(`${title} ${artist}`);
-    switch (platform) {
-      case 'spotify':       return `https://open.spotify.com/search/${q}`;
-      case 'appleMusic':    return `https://music.apple.com/search?term=${q}`;
-      case 'youtubeMusic':  return `https://music.youtube.com/search?q=${q}`;
-      case 'tidal':         return `https://listen.tidal.com/search?q=${q}`;
-      case 'deezer':        return `https://www.deezer.com/search/${q}`;
-      case 'amazonMusic':   return `https://music.amazon.com/search/${q}`;
-      default:              return null;
-    }
-  };
 
   const openWithLinks = (platformLinks, song) => {
     const preferred = platformLinks[preferredPlatform];
@@ -645,6 +635,32 @@ function App() {
   }, []);
 
   if (user === undefined) return null;
+
+  // Leave a shared-song page for the app. "Swap back" sends the sender a
+  // friend request: right away if logged in, otherwise after sign-up.
+  const leaveSharedSong = (swapWith) => {
+    window.history.replaceState(null, '', '/');
+    setSharedSongId(null);
+    if (!swapWith || swapWith.id === user?.id) return;
+    if (user) {
+      setSidebarOpen(true);
+      addFriend(swapWith.code);
+    } else {
+      savePendingInvite(swapWith.code);
+      setPendingInvite(swapWith.code.toUpperCase());
+      setAuthMode('register');
+      setShowAuth(true);
+    }
+  };
+
+  if (sharedSongId) return (
+    <SharedSongPage
+      id={sharedSongId}
+      user={user}
+      onSwapBack={leaveSharedSong}
+      onClose={() => leaveSharedSong(null)}
+    />
+  );
 
   if (!user && !showAuth) return (
     <LandingPage

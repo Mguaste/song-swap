@@ -3,11 +3,8 @@ import { ChangePassword } from './ChangePassword';
 import { DeleteAccount } from './DeleteAccount';
 import { AdminResetPassword } from './AdminResetPassword';
 import { NotificationSettings } from './NotificationSettings';
+import { PLATFORMS } from '../../lib/platforms';
 
-const PLATFORMS = [
-  ['spotify', 'Spotify'], ['appleMusic', 'Apple Music'], ['youtubeMusic', 'YouTube Music'],
-  ['amazonMusic', 'Amazon Music'], ['tidal', 'Tidal'], ['deezer', 'Deezer'],
-];
 
 export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform, onPlatformChange, onAccountDeleted }) {
   return (

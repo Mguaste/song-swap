@@ -3,6 +3,7 @@ import { Avatar } from './Avatar';
 import { StarRating } from './StarRating';
 import { timeAgo, greeting, untilText } from '../lib/format';
 import { NotifyPrompt } from './NotifyPrompt';
+import { ShareSongCard } from './ShareSongCard';
 
 // Small ring showing how many friends you've sent a song to today
 function ProgressRing({ done, total }) {
@@ -195,6 +196,8 @@ export function Dashboard({ user, friends, friendCount, friendRequests, sentRequ
           <button id="dash-invite-btn" onClick={onInvite}>{inviteCopied ? '✓ Link copied' : 'Share invite link'}</button>
         </div>
       )}
+
+      <ShareSongCard />
 
       {recent.length > 0 && (
         <section className="dash-section">

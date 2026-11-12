@@ -2091,3 +2091,128 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 .dash-notify { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border-color: #10B98155; }
 .dash-notify-actions { display: flex; align-items: center; gap: 14px; }
 .notif-msg { font-size: 0.82rem; color: #b3b3b3; }
+
+/* ── Song share links: "Send a song to anyone" card ── */
+
+.share-song-card { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+#empty-state .share-song-card { width: 100%; max-width: 420px; margin-top: 8px; }
+.share-song-card .dash-invite-sub { margin: -6px 0 0; }
+.share-song-input { display: flex; gap: 8px; }
+.share-song-input input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 0.86rem;
+  color: #fff;
+  background: #121212;
+  border: 1px solid #333;
+  border-radius: 8px;
+}
+.share-song-input input:focus { outline: none; border-color: #10B981; }
+.share-song-btn {
+  padding: 9px 16px;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  background: #10B981;
+  color: #000;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.share-song-btn:disabled { opacity: 0.5; cursor: default; }
+.share-song-btn:not(:disabled):hover { filter: brightness(1.1); }
+.share-song-result { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.share-song-result .dash-art-sm { width: 40px; height: 40px; }
+.share-song-again { font-size: 0.8rem; flex-basis: 100%; text-align: left; }
+.share-song-error { margin: 0; color: #f87171; font-size: 0.82rem; }
+
+/* ── Shared song page (/s/<id>) ── */
+
+#shared-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+.shared-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: #181818;
+  border: 1px solid #282828;
+  border-radius: 16px;
+  padding: 24px 24px 28px;
+  box-sizing: border-box;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.4s ease;
+}
+.shared-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: #10B981;
+  font: inherit;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 18px;
+}
+.shared-brand .shared-logo { width: 28px; height: 28px; }
+.shared-logo { width: 48px; height: 48px; }
+.shared-from { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; color: #ccc; font-size: 0.92rem; }
+.shared-from strong { color: #fff; }
+.avatar-shared { width: 26px; height: 26px; font-size: 0.75rem; }
+.shared-art {
+  width: 100%;
+  max-width: 240px;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.shared-art.placeholder { background: #2a2a2a; }
+.shared-title { margin: 18px 0 2px; color: #fff; font-size: 1.35rem; line-height: 1.25; }
+.shared-artist { margin: 0; color: #ccc; font-size: 1rem; }
+.shared-album { margin: 2px 0 0; color: #777; font-size: 0.82rem; }
+.shared-listen-label { margin: 22px 0 8px; color: #888; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.shared-platforms { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.shared-platform {
+  padding: 7px 12px;
+  border: 1px solid #333;
+  border-radius: 20px;
+  color: #ddd;
+  font-size: 0.82rem;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s;
+}
+.shared-platform:hover { border-color: #10B981; color: #fff; }
+.shared-platform.preferred { border-color: #10B981; color: #10B981; font-weight: 600; }
+.shared-cta { margin-top: 26px; padding-top: 20px; border-top: 1px solid #282828; width: 100%; }
+.shared-cta p { margin: 0 0 12px; color: #ccc; font-size: 0.9rem; }
+.shared-cta strong { color: #fff; }
+.shared-cta-btn {
+  width: 100%;
+  padding: 12px 18px;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background: #10B981;
+  color: #000;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+}
+.shared-cta-btn:hover { filter: brightness(1.1); }
+.shared-cta .shared-fine { margin: 10px 0 0; color: #777; font-size: 0.78rem; }
+.shared-error { color: #ccc; margin: 16px 0 20px; }

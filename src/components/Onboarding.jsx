@@ -1,4 +1,5 @@
 import icon from '../assets/SSLogo.png';
+import { ShareSongCard } from './ShareSongCard';
 
 // Shown instead of the dashboard until you have a friend
 export function Onboarding({ user, inviteCopied, onInvite, sentRequests, friendRequests, onOpenSidebar }) {
@@ -22,6 +23,7 @@ export function Onboarding({ user, inviteCopied, onInvite, sentRequests, friendR
           Waiting on {sentRequests.map(r => r.to_name).join(', ')} to accept
         </p>
       )}
+      <ShareSongCard />
       {friendRequests.length > 0 && (
         <button className="link-btn" onClick={onOpenSidebar}>
           You have {friendRequests.length} friend request{friendRequests.length > 1 ? 's' : ''} — open sidebar

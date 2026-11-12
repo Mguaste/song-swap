@@ -61,6 +61,9 @@ https://ko-fi.com/mguaste
 * [x] Fixes: logging out no longer passes the open swap to the next login; deploys no longer bring back old "current" songs
 * [x] Profile pictures (friends-only, resized to 256px) + change username (once every 7 days)
 * [x] Compatibility: "75% match" per friend (80% mutual ratings, 20% shared artists; needs 5 songs + 2 ratings)
+* [x] SEO: structured data, canonical URLs, share image, crawlable homepage text, "What is a song swap?" page (`/what-is-a-song-swap`)
+* [x] Invite links show who invited you + personal link previews; adding someone who already asked you accepts it
+* [x] Song share links (`/s/<id>`): send one song to anyone, no account needed to listen; "swap back" sends a friend request
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.
