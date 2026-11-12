@@ -1,7 +1,17 @@
+import { useEffect, useState } from 'react';
 import icon from '../assets/SSLogo.png';
 import { LoginForm, RegisterForm } from './AuthForms';
 
 export function AuthScreen({ authMode, onModeChange, pendingInvite, onLoggedIn, onBack }) {
+  const [inviter, setInviter] = useState(null);
+  useEffect(() => {
+    if (!pendingInvite) return;
+    fetch(`/api/invite/${encodeURIComponent(pendingInvite)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setInviter(d?.name ?? null))
+      .catch(() => {});
+  }, [pendingInvite]);
+
   return (
     <div id="login-page">
       <div id="login-card">
@@ -10,7 +20,12 @@ export function AuthScreen({ authMode, onModeChange, pendingInvite, onLoggedIn, 
         <p id="login-subtitle">
           {authMode === 'login' ? 'Log in to your Song Swap account' : 'Create your free Song Swap account'}
         </p>
-        {pendingInvite && <p id="invite-note">You've been invited to swap songs — sign up or log in and we'll send the friend request.</p>}
+        {pendingInvite && (
+          <p id="invite-note">
+            {inviter ? <><strong>{inviter}</strong> invited you to swap songs.</> : "You've been invited to swap songs."}
+            {' '}{authMode === 'login' ? 'Log in' : 'Create an account'} and we'll send {inviter ?? 'them'} a friend request.
+          </p>
+        )}
         {authMode === 'login'
           ? <LoginForm onLogin={onLoggedIn} />
           : <RegisterForm onLogin={onLoggedIn} />

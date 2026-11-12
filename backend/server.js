@@ -732,25 +732,51 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// Send a friend request by friend code
+// Who an invite link is from, for the sign-up screen. The code was shared on
+// purpose, so revealing the matching username is fine.
+app.get('/api/invite/:code', authLimiter, async (req, res) => {
+  const name = await inviterName(req.params.code);
+  if (!name) return res.status(404).json({ error: 'Invite not found' });
+  res.json({ name });
+});
+
+const inviterName = async (code) => {
+  if (!/^[A-Za-z0-9]{6}$/.test(code ?? '')) return null;
+  const { rows } = await pool.query('SELECT name FROM users WHERE friend_code = $1', [code.toUpperCase()]);
+  return rows[0]?.name ?? null;
+};
+
+// Add a friend by code (typed or from an invite link): sends a request the
+// other person accepts. If they already asked you, this accepts theirs.
 app.post('/api/friends/add', requireAuth, async (req, res) => {
   const { friendCode } = req.body;
   if (!friendCode) return res.status(400).json({ error: 'Friend code required' });
 
-  const { rows: target } = await pool.query('SELECT id, name FROM users WHERE friend_code = $1', [friendCode.toUpperCase()]);
+  const { rows: target } = await pool.query('SELECT id, name FROM users WHERE friend_code = $1', [String(friendCode).toUpperCase()]);
   if (target.length === 0) return res.status(404).json({ error: 'No user found with that friend code' });
 
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
   const myId = me[0].id;
   const theirId = target[0].id;
+  const myName = req.session.user.name;
+  const theirName = target[0].name;
 
   if (myId === theirId) return res.status(400).json({ error: 'You cannot add yourself' });
 
   const { rows: existing } = await pool.query(
-    'SELECT id FROM friendships WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)',
+    'SELECT id, status, requester_id FROM friendships WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)',
     [myId, theirId]
   );
-  if (existing.length > 0) return res.status(409).json({ error: 'Friend request already exists or already friends' });
+  const prior = existing[0];
+  if (prior?.status === 'accepted') return res.status(409).json({ error: `You and ${theirName} are already friends` });
+  // They already sent you a request: adding them back accepts it
+  if (prior && prior.requester_id === theirId) {
+    await pool.query("UPDATE friendships SET status = 'accepted' WHERE id = $1", [prior.id]);
+    io.to(`user-${myName}`).emit('friendship-accepted');
+    io.to(`user-${theirName}`).emit('friendship-accepted');
+    return res.status(201).json({ message: `You and ${theirName} are now friends`, friendshipId: prior.id, accepted: true });
+  }
+  if (prior) return res.status(409).json({ error: `You already sent ${theirName} a friend request` });
 
   await pool.query('INSERT INTO friendships (requester_id, receiver_id) VALUES ($1, $2)', [myId, theirId]);
   io.to(`user-${target[0].name}`).emit('friend-request-received');
@@ -1152,6 +1178,24 @@ if (fs.existsSync(DIST)) {
   };
   // extensions: /what-is-a-song-swap serves what-is-a-song-swap.html
   app.use(express.static(DIST, { dotfiles: 'allow', extensions: ['html'], setHeaders: noCacheHtml }));
+  // Invite links get a personal link preview ("Marcus invited you…") and stay
+  // out of search results
+  const escapeHtml = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  app.get('/add/:code', async (req, res, next) => {
+    try {
+      const name = await inviterName(req.params.code);
+      if (!name) return next();
+      const title = escapeHtml(`${name} invited you to Song Swap`);
+      const desc = escapeHtml(`Swap songs with ${name}, one track at a time. Works with Spotify, Apple Music, YouTube Music, and more.`);
+      const html = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
+        .replace(/(<meta (?:property|name)="(?:og|twitter):title" content=")[^"]*/g, (_, tag) => tag + title)
+        .replace(/(<meta (?:property|name)="(?:og|twitter):description" content=")[^"]*/g, (_, tag) => tag + desc)
+        .replace(/(<meta property="og:url" content=")[^"]*/, (_, tag) => `${tag}https://song-swap.app/add/${req.params.code.toUpperCase()}`)
+        .replace('<head>', '<head>\n    <meta name="robots" content="noindex" />');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.type('html').send(html);
+    } catch (err) { next(err); }
+  });
   app.get('/{*path}', (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(DIST, 'index.html'));

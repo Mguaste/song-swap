@@ -305,8 +305,11 @@ function App() {
       body: JSON.stringify({ friendCode: code }),
     });
     const data = await r.json().catch(() => ({}));
-    if (r.ok) { setAddCodeSuccess(data.message); setAddCodeInput(''); loadRequests(); }
-    else setAddCodeError(data.error || 'Could not add that friend');
+    if (!r.ok) { setAddCodeError(data.error || 'Could not add that friend'); return; }
+    setAddCodeSuccess(data.message);
+    setAddCodeInput('');
+    loadRequests();
+    if (data.accepted) loadFriends();
   };
 
   const applyRating = ({ id, rating }) => {
