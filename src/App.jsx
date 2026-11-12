@@ -718,6 +718,8 @@ function App() {
           activeFriendshipId={activeFriendship?.friendship_id}
           unread={unreadFriendships}
           onSelectFriend={selectFriend}
+          onDashboard={goHome}
+          dashboardActive={!activeFriendship && !showSettings}
         />
 
         <main id="main-content">
