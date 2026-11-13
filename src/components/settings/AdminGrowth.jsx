@@ -44,12 +44,21 @@ export function AdminGrowth() {
       ['…from a song link', frBy('share', 'accepted')],
       ['…from an invite link', frBy('invite', 'accepted')],
     ]],
+    ['Without me', [
+      ['Friend requests sent', data.withoutMe.requests],
+      ['Friendships accepted', data.withoutMe.accepted],
+      ['Songs swapped', data.withoutMe.songs],
+      ['Pairs swapping', data.withoutMe.pairs],
+    ]],
   ];
 
   return (
     <div className="growth">
       <p className="growth-headline">
         <strong>{data.users.with_friend}</strong> of {data.users.total} people have at least one friend
+      </p>
+      <p className="growth-headline growth-headline-sub">
+        <strong>{data.withoutMe.people.with_friend}</strong> of {data.withoutMe.people.total} other people have a friend who isn't you
       </p>
       <table className="growth-table">
         <thead>
@@ -69,7 +78,8 @@ export function AdminGrowth() {
       </table>
       <p className="growth-note">
         Link and sign-up counts started Nov 2026. Older friend requests don't have a source, and
-        removed friendships aren't counted.
+        removed friendships aren't counted. “Without me” leaves out every friendship you're in;
+        song history only goes back to Nov 10, 2026. Test accounts are never counted.
       </p>
     </div>
   );

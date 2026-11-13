@@ -71,6 +71,7 @@ https://ko-fi.com/mguaste
 * [x] Songs open the normal web link (no more "pick an app" prompt for Spotify on computers without the app)
 * [x] Settings → "Spotify on this computer": Browser (default) or Desktop app, saved per device; phones always use the app
 * [x] Memo to all users (Settings → Admin): banner shown once to everyone (live if online), optional "Open Settings" button; new accounts skip old memos
+* [x] Test accounts (`is_test`, TestTest) left out of all counts; Growth panel "Without me" section (friendships and swaps between other people)
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

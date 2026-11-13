@@ -603,7 +603,14 @@ app.delete('/api/me', requireAuth, authLimiter, async (req, res) => {
 // turn into friendships? Last 7 days, last 30 days, all time.
 app.get('/api/admin/stats', requireAdmin, async (req, res) => {
   const tz = RESET_TIMEZONE;
-  const [counts, users, friends] = await Promise.all([
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  // Friendships between other people: not involving the viewing admin or a test account
+  const notMine = `f.requester_id <> $1 AND f.receiver_id <> $1
+    AND NOT EXISTS (SELECT 1 FROM users t WHERE t.is_test AND t.id IN (f.requester_id, f.receiver_id))`;
+  const period = (col, extra = '') => ['7 days', '30 days', null].map((iv, i) =>
+    `COUNT(${extra || '*'}) FILTER (WHERE ${iv ? `${col} > NOW() - INTERVAL '${iv}'` : 'TRUE'})::int AS ${['week', 'month', 'total'][i]}`
+  ).join(', ');
+  const [counts, users, friends, others, otherRequests, otherAccepted, otherSongs, otherPairs] = await Promise.all([
     pool.query(
       `SELECT event,
          COALESCE(SUM(count) FILTER (WHERE day > (NOW() AT TIME ZONE $1)::date - 7), 0)::int AS week,
@@ -630,11 +637,33 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
        FROM friendships f
        WHERE NOT EXISTS (SELECT 1 FROM users t WHERE t.is_test AND t.id IN (f.requester_id, f.receiver_id))
        GROUP BY 1`),
+    // ── Without me ──
+    pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE EXISTS (
+                SELECT 1 FROM friendships f WHERE f.status = 'accepted'
+                  AND u.id IN (f.requester_id, f.receiver_id) AND ${notMine}))::int AS with_friend
+       FROM users u WHERE NOT u.is_test AND u.id <> $1`, [me[0].id]),
+    pool.query(`SELECT ${period('f.created_at')} FROM friendships f WHERE ${notMine}`, [me[0].id]),
+    pool.query(`SELECT ${period('f.accepted_at')} FROM friendships f WHERE f.status = 'accepted' AND ${notMine}`, [me[0].id]),
+    pool.query(
+      `SELECT ${period('sh.sent_at')} FROM song_history sh JOIN friendships f ON f.id = sh.friendship_id
+       WHERE ${notMine}`, [me[0].id]),
+    pool.query(
+      `SELECT ${period('sh.sent_at', 'DISTINCT sh.friendship_id')} FROM song_history sh JOIN friendships f ON f.id = sh.friendship_id
+       WHERE ${notMine}`, [me[0].id]),
   ]);
   res.json({
     events: Object.fromEntries(counts.rows.map(r => [r.event, r])),
     users: users.rows[0],
     friendships: Object.fromEntries(friends.rows.map(r => [r.source, r])),
+    withoutMe: {
+      people: others.rows[0],
+      requests: otherRequests.rows[0],
+      accepted: otherAccepted.rows[0],
+      songs: otherSongs.rows[0],
+      pairs: otherPairs.rows[0],
+    },
   });
 });
 
