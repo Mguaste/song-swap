@@ -66,6 +66,9 @@ https://ko-fi.com/mguaste
 * [x] Song share links (`/s/<id>`): send one song to anyone, no account needed to listen; "swap back" sends a friend request
 * [x] Swapping back from a song link starts the swap with that song in history
 * [x] Admin Growth numbers (Settings → Admin): sign-ups, link opens, friend requests and accepts by source; daily totals only
+* [x] "Not on your service" choice: when a song was searched for and confirmed missing on your app, pick another service (or search anyway) instead of landing on an empty search
+* [x] Optional profile picture during sign-up
+* [x] Songs open the normal web link (no more "pick an app" prompt for Spotify on computers without the app)
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

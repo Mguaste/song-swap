@@ -1635,6 +1635,11 @@ const lookupTidal = async (id) => {
 // Each returns a link object or null, and never throws (a failed platform just
 // means no direct link; the frontend falls back to a search URL).
 
+// A search that finished cleanly and found no match. Only these count as
+// "not on this service"; errors, missing keys and services we can't check
+// reliably return null (unknown), and the frontend falls back to a search.
+const NOT_FOUND = Object.freeze({ notFound: true });
+
 const searchSpotify = async (song) => {
   const token = await getSpotifyToken();
   if (!token) return null;
@@ -1643,12 +1648,15 @@ const searchSpotify = async (song) => {
     `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}`, { headers });
   try {
     if (song.isrc) {
-      const hit = (await search(`isrc:${song.isrc}`, 1))?.tracks?.items?.[0];
+      const data = await search(`isrc:${song.isrc}`, 1);
+      if (!data) return null;
+      const hit = data.tracks?.items?.[0];
       if (hit) return { id: hit.id, isrc: song.isrc };
     }
-    const items = (await search(`track:${coreTitle(song.title)} artist:${leadArtist(song.artist)}`, 10))?.tracks?.items;
-    const hit = pickBest(song, items, t => t.name, t => t.artists.map(a => a.name).join(', '));
-    return hit ? { id: hit.id, isrc: hit.external_ids?.isrc ?? null } : null;
+    const data = await search(`track:${coreTitle(song.title)} artist:${leadArtist(song.artist)}`, 10);
+    if (!data) return null;
+    const hit = pickBest(song, data.tracks?.items, t => t.name, t => t.artists.map(a => a.name).join(', '));
+    return hit ? { id: hit.id, isrc: hit.external_ids?.isrc ?? null } : NOT_FOUND;
   } catch { return null; }
 };
 
@@ -1656,8 +1664,9 @@ const searchItunes = async (song) => {
   try {
     const q = encodeURIComponent(`${coreTitle(song.title)} ${leadArtist(song.artist)}`);
     const data = await fetchJson(`https://itunes.apple.com/search?term=${q}&entity=song&limit=15&country=us`);
-    const hit = pickBest(song, data?.results, r => r.trackName, r => r.artistName);
-    return hit?.trackViewUrl ? { url: hit.trackViewUrl } : null;
+    if (!data) return null;
+    const hit = pickBest(song, data.results, r => r.trackName, r => r.artistName);
+    return hit?.trackViewUrl ? { url: hit.trackViewUrl } : NOT_FOUND;
   } catch { return null; }
 };
 
@@ -1669,8 +1678,10 @@ const searchDeezer = async (song) => {
     }
     const q = encodeURIComponent(`${coreTitle(song.title)} ${leadArtist(song.artist)}`);
     const data = await fetchJson(`https://api.deezer.com/search?q=${q}&limit=15`);
-    const hit = pickBest(song, data?.data, t => t.title, t => t.artist?.name);
-    return hit?.link ? { url: hit.link } : null;
+    // Deezer reports failures (e.g. quota) as 200 with an error object
+    if (!data || data.error || !Array.isArray(data.data)) return null;
+    const hit = pickBest(song, data.data, t => t.title, t => t.artist?.name);
+    return hit?.link ? { url: hit.link } : NOT_FOUND;
   } catch { return null; }
 };
 
@@ -1748,7 +1759,8 @@ const resolveSong = async (link) => {
     let spotifyId = parsed.platform === 'spotify' ? parsed.id : null;
     if (!platformLinks.spotify) {
       const sp = await searchSpotify(song);
-      if (sp) {
+      if (sp?.notFound) platformLinks.spotify = NOT_FOUND;
+      else if (sp) {
         spotifyId = sp.id;
         platformLinks.spotify = spotifyTrackLinks(sp.id);
         song.isrc ??= sp.isrc;

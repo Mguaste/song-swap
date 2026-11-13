@@ -34,11 +34,12 @@ export function SharedSongPage({ id, user, onSwapBack, onClose }) {
 
   const { from, song } = data;
   const isMine = user && user.id === from.id;
-  const preferred = user?.preferred_platform;
-  // The listener's own app first, if we know it
-  const platforms = preferred
-    ? [...PLATFORMS].sort(([a], [b]) => (b === preferred) - (a === preferred))
-    : PLATFORMS;
+  const isMissing = (key) => !!song.platformLinks?.[key]?.notFound;
+  // Not highlighted if we checked and the song isn't there
+  const preferred = isMissing(user?.preferred_platform) ? null : user?.preferred_platform;
+  // The listener's own app first, if we know it; services without the song last
+  const platforms = [...PLATFORMS].sort(([a], [b]) =>
+    (b === preferred) - (a === preferred) || isMissing(a) - isMissing(b));
 
   return (
     <div id="shared-page">
@@ -66,7 +67,7 @@ export function SharedSongPage({ id, user, onSwapBack, onClose }) {
             return url && (
               <a key={key} href={url} target="_blank" rel="noreferrer"
                 className={`shared-platform${key === preferred ? ' preferred' : ''}`}>
-                {label}
+                {isMissing(key) ? `Search ${label}` : label}
               </a>
             );
           })}

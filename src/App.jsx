@@ -5,6 +5,7 @@ import { BASE_TITLE, setFaviconPip } from './lib/favicon';
 import { readPendingInvite, readPendingSource, clearPendingInvite, savePendingInvite, readPendingShare, clearPendingShare, readPendingSwap, readShareLinkId } from './lib/pending';
 import { registerServiceWorker, disablePush, restorePush } from './lib/push';
 import { buildSearchUrl } from './lib/platforms';
+import { NotFoundPrompt } from './components/NotFoundPrompt';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -59,6 +60,8 @@ function App() {
   // Settings
   const [showSettings, setShowSettings] = useState(false);
   const [preferredPlatform, setPreferredPlatform] = useState('spotify');
+  // Song confirmed missing on the preferred service: { song, platformLinks }
+  const [notFoundChoice, setNotFoundChoice] = useState(null);
   const [verifyError, setVerifyError] = useState('');
 
   // Unread tracking
@@ -196,15 +199,18 @@ function App() {
   const openWithLinks = (platformLinks, song) => {
     const preferred = platformLinks[preferredPlatform];
     if (preferred?.url) {
-      if (preferredPlatform === 'spotify' && preferred.nativeAppUriMobile) {
-        window.location.href = preferred.nativeAppUriMobile;
-        setTimeout(() => window.open(preferred.url, '_blank'), 1000);
-      } else {
-        window.open(preferred.url, '_blank');
-      }
+      // Always the web link: phones hand open.spotify.com (and the others)
+      // to the installed app, and computers without the app play it in the
+      // browser instead of asking which app to use for a spotify: link.
+      window.open(preferred.url, '_blank');
       return;
     }
-    // Preferred platform not in API response — use search URL if we have metadata
+    // Searched for and confirmed missing there: let them pick another service
+    if (preferred?.notFound && PLATFORM_PRIORITY.some(p => platformLinks[p]?.url)) {
+      setNotFoundChoice({ song, platformLinks });
+      return;
+    }
+    // Preferred platform not checked (or lookup failed) — use search URL if we have metadata
     if (song?.title && song?.artist) {
       const searchUrl = buildSearchUrl(preferredPlatform, song.title, song.artist);
       if (searchUrl) { window.open(searchUrl, '_blank'); return; }
@@ -239,8 +245,7 @@ function App() {
       } catch { /* lookup failed — fall back to Spotify below */ }
     }
     // Fallback: open in Spotify
-    if (song.spotifyUri) window.location.href = song.spotifyUri;
-    setTimeout(() => { if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank'); }, 1000);
+    if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank');
   };
 
   // Called with a link (on paste) or with a click/key event (uses the input's value)
@@ -783,6 +788,14 @@ function App() {
           )}
         </main>
       </div>
+      {notFoundChoice && (
+        <NotFoundPrompt
+          song={notFoundChoice.song}
+          platformLinks={notFoundChoice.platformLinks}
+          preferredPlatform={preferredPlatform}
+          onClose={() => setNotFoundChoice(null)}
+        />
+      )}
     </div>
   );
 }
