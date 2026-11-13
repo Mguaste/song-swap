@@ -159,6 +159,11 @@ const initDb = async () => {
   `);
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_announcement_id INT NOT NULL DEFAULT 0');
 
+  // Test accounts still work normally but are left out of every count:
+  // admin Growth numbers, memo read counts, and friends' "Your numbers".
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT FALSE');
+  await pool.query(`UPDATE users SET is_test = TRUE WHERE LOWER(name) = 'testtest' AND NOT is_test`);
+
   // One-time: carry over the original hard-coded admin if no admin exists yet
   await pool.query(`UPDATE users SET is_admin = TRUE
     WHERE LOWER(name) = 'mguaste' AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)`);
@@ -610,8 +615,10 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::int AS month,
               COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE EXISTS (
-                SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND users.id IN (f.requester_id, f.receiver_id)))::int AS with_friend
-       FROM users`),
+                SELECT 1 FROM friendships f
+                JOIN users o ON o.id = CASE WHEN f.requester_id = users.id THEN f.receiver_id ELSE f.requester_id END
+                WHERE f.status = 'accepted' AND users.id IN (f.requester_id, f.receiver_id) AND NOT o.is_test))::int AS with_friend
+       FROM users WHERE NOT is_test`),
     pool.query(
       `SELECT COALESCE(source, 'untracked') AS source,
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS requests_week,
@@ -620,7 +627,9 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
               COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '7 days')::int AS accepted_week,
               COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '30 days')::int AS accepted_month,
               COUNT(*) FILTER (WHERE status = 'accepted')::int AS accepted_total
-       FROM friendships GROUP BY 1`),
+       FROM friendships f
+       WHERE NOT EXISTS (SELECT 1 FROM users t WHERE t.is_test AND t.id IN (f.requester_id, f.receiver_id))
+       GROUP BY 1`),
   ]);
   res.json({
     events: Object.fromEntries(counts.rows.map(r => [r.event, r])),
@@ -1139,6 +1148,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   const mine = `SELECT f.id, CASE WHEN f.requester_id = $1 THEN u2.name ELSE u1.name END AS friend_name
     FROM friendships f JOIN users u1 ON u1.id = f.requester_id JOIN users u2 ON u2.id = f.receiver_id
     WHERE (f.requester_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'`;
+  // Same, minus test accounts: used for the "Your numbers" totals
+  const mineReal = `${mine} AND NOT u1.is_test AND NOT u2.is_test`;
   // Start of today / tomorrow in the reset timezone, matching the midnight clear
   const TODAY = `(date_trunc('day', NOW() AT TIME ZONE $3) AT TIME ZONE $3)`;
   const [newForYou, today, unrated, recent, loved, stats, resetAt] = await Promise.all([
@@ -1196,7 +1207,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     ),
     // Totals, average rating your songs got, most-swapped artist
     pool.query(
-      `WITH mine AS (${mine}),
+      `WITH mine AS (${mineReal}),
        songs AS (SELECT sh.* FROM song_history sh JOIN mine m ON m.id = sh.friendship_id)
        SELECT
          (SELECT COUNT(*) FROM songs WHERE sent_by = $2)::int AS sent,
@@ -1334,7 +1345,7 @@ app.get('/api/admin/announcements', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT a.id, a.message, a.action, a.created_at,
        -- people who had an account when it was posted and have closed it
-       (SELECT COUNT(*)::int FROM users u WHERE u.last_announcement_id >= a.id AND u.created_at < a.created_at) AS seen
+       (SELECT COUNT(*)::int FROM users u WHERE u.last_announcement_id >= a.id AND u.created_at < a.created_at AND NOT u.is_test) AS seen
      FROM announcements a ORDER BY a.id DESC LIMIT 20`
   );
   res.json(rows);
@@ -1881,7 +1892,7 @@ const SHARES_PER_HOUR = 30;
 const shareCounts = new Map(); // userId → { count, start }
 
 app.post('/api/shares', requireAuth, async (req, res) => {
-  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  const { rows: me } = await pool.query('SELECT id, is_test FROM users WHERE name = $1', [req.session.user.name]);
   const now = Date.now();
   const entry = shareCounts.get(me[0].id) ?? { count: 0, start: now };
   if (now - entry.start > 60 * 60 * 1000) { entry.count = 0; entry.start = now; }
@@ -1891,7 +1902,7 @@ app.post('/api/shares', requireAuth, async (req, res) => {
   if (song.error) return res.status(song.status).json({ error: song.error });
   entry.count++;
   shareCounts.set(me[0].id, entry);
-  countEvent('share_created');
+  if (!me[0].is_test) countEvent('share_created');
 
   const id = newShareId();
   await pool.query(
