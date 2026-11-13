@@ -6,6 +6,7 @@ import { readPendingInvite, readPendingSource, clearPendingInvite, savePendingIn
 import { registerServiceWorker, disablePush, restorePush } from './lib/push';
 import { buildSearchUrl, openSpotify } from './lib/platforms';
 import { NotFoundPrompt } from './components/NotFoundPrompt';
+import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -62,6 +63,7 @@ function App() {
   const [preferredPlatform, setPreferredPlatform] = useState('spotify');
   // Song confirmed missing on the preferred service: { song, platformLinks }
   const [notFoundChoice, setNotFoundChoice] = useState(null);
+  const [memoTick, setMemoTick] = useState(0); // bumped when the admin posts a memo
   const [verifyError, setVerifyError] = useState('');
 
   // Unread tracking
@@ -616,6 +618,7 @@ function App() {
     });
     // You changed your name/picture in another tab
     socket.on('me-updated', () => loadMe());
+    socket.on('announcements-updated', () => setMemoTick(t => t + 1));
     socket.on('friendship-removed', ({ friendshipId }) => closeFriendship(friendshipId));
     socket.on('friend-request-declined', () => loadRequests());
     return () => {
@@ -635,6 +638,7 @@ function App() {
       socket.off('friendship-accepted');
       socket.off('friend-updated');
       socket.off('me-updated');
+      socket.off('announcements-updated');
       socket.off('friendship-removed');
       socket.off('friend-request-declined');
     };
@@ -700,6 +704,10 @@ function App() {
         onToggleSettings={() => setShowSettings(v => !v)}
         onOpenAdmin={openAdmin}
         onLogout={logout}
+      />
+      <AnnouncementBanner
+        refreshKey={`${user.id}|${memoTick}`}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       <div id="app-body">

@@ -3,6 +3,7 @@ import { ChangePassword } from './ChangePassword';
 import { DeleteAccount } from './DeleteAccount';
 import { AdminResetPassword } from './AdminResetPassword';
 import { AdminGrowth } from './AdminGrowth';
+import { AdminAnnouncements } from './AdminAnnouncements';
 import { NotificationSettings } from './NotificationSettings';
 import { useState } from 'react';
 import { PLATFORMS, isPhone, getSpotifyOpen, setSpotifyOpen } from '../../lib/platforms';
@@ -63,6 +64,10 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
           <div className="settings-row settings-row-block">
             <label className="settings-label">Growth</label>
             <AdminGrowth />
+          </div>
+          <div className="settings-row settings-row-block">
+            <label className="settings-label">Memo to Users</label>
+            <AdminAnnouncements />
           </div>
           <div className="settings-row">
             <label className="settings-label">History</label>

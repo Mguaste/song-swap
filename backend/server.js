@@ -146,6 +146,19 @@ const initDb = async () => {
       PRIMARY KEY (user_id, friendship_id)
     )
   `);
+  // Memos from the admin, shown once to each user as a banner. Each user
+  // keeps the id of the newest one they've closed; new accounts start at
+  // the newest existing memo so they don't get old news.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS announcements (
+      id SERIAL PRIMARY KEY,
+      message TEXT NOT NULL,
+      action TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_announcement_id INT NOT NULL DEFAULT 0');
+
   // One-time: carry over the original hard-coded admin if no admin exists yet
   await pool.query(`UPDATE users SET is_admin = TRUE
     WHERE LOWER(name) = 'mguaste' AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)`);
@@ -470,7 +483,8 @@ app.post('/api/register', authLimiter, async (req, res) => {
   }
 
   await pool.query(
-    'INSERT INTO users (name, password_hash, friend_code, preferred_platform) VALUES ($1, $2, $3, $4)',
+    `INSERT INTO users (name, password_hash, friend_code, preferred_platform, last_announcement_id)
+     VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(id), 0) FROM announcements))`,
     [trimmed, passwordHash, code, platform]
   );
   req.session.user = { name: trimmed };
@@ -1288,6 +1302,61 @@ app.get('/api/friends/:id/my-song', requireAuth, (req, res) => {
 app.get('/api/history', requireAdmin, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM song_history ORDER BY sent_at ASC');
   res.json(rows.map(rowToEntry));
+});
+
+// ── Announcements (memos to all users) ──
+const ANNOUNCEMENT_MAX = 280;
+const ANNOUNCEMENT_ACTIONS = ['settings'];
+
+// The oldest memo this user hasn't closed yet (one banner at a time)
+app.get('/api/announcements', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT a.id, a.message, a.action FROM announcements a
+     JOIN users u ON u.name = $1
+     WHERE a.id > u.last_announcement_id
+     ORDER BY a.id LIMIT 1`,
+    [req.session.user.name]
+  );
+  res.json({ announcement: rows[0] ?? null });
+});
+
+app.post('/api/announcements/:id/dismiss', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Bad id' });
+  await pool.query(
+    'UPDATE users SET last_announcement_id = GREATEST(last_announcement_id, $1) WHERE name = $2',
+    [id, req.session.user.name]
+  );
+  res.json({ success: true });
+});
+
+app.get('/api/admin/announcements', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT a.id, a.message, a.action, a.created_at,
+       -- people who had an account when it was posted and have closed it
+       (SELECT COUNT(*)::int FROM users u WHERE u.last_announcement_id >= a.id AND u.created_at < a.created_at) AS seen
+     FROM announcements a ORDER BY a.id DESC LIMIT 20`
+  );
+  res.json(rows);
+});
+
+app.post('/api/admin/announcements', requireAdmin, async (req, res) => {
+  const message = String(req.body?.message ?? '').trim();
+  const action = ANNOUNCEMENT_ACTIONS.includes(req.body?.action) ? req.body.action : null;
+  if (!message) return res.status(400).json({ error: 'Write a message first' });
+  if (message.length > ANNOUNCEMENT_MAX) return res.status(400).json({ error: `Keep it under ${ANNOUNCEMENT_MAX} characters` });
+  const { rows } = await pool.query(
+    'INSERT INTO announcements (message, action) VALUES ($1, $2) RETURNING id',
+    [message, action]
+  );
+  io.emit('announcements-updated'); // people online see it right away
+  res.status(201).json({ id: rows[0].id });
+});
+
+app.delete('/api/admin/announcements/:id', requireAdmin, async (req, res) => {
+  await pool.query('DELETE FROM announcements WHERE id = $1', [parseInt(req.params.id, 10) || 0]);
+  io.emit('announcements-updated');
+  res.json({ success: true });
 });
 
 app.delete('/api/admin/history', requireAdmin, async (req, res) => {

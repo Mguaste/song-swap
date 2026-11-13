@@ -2309,3 +2309,60 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 }
 #login-form .register-photo-remove:hover { color: #fff; filter: none; transform: none; }
 #login-form button[type="submit"]:disabled { opacity: 0.6; cursor: default; transform: none; }
+
+/* Memo banner (admin announcements) */
+.announcement {
+  flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px 10px 20px;
+  background: rgba(16, 185, 129, 0.12);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.35);
+  color: #e8e8e8;
+  font-size: 0.9rem;
+}
+.announcement-text { flex: 1; margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
+.announcement-action {
+  flex: none;
+  padding: 6px 12px;
+  font: inherit; font-size: 0.82rem; font-weight: 700;
+  background: #10B981; color: #000;
+  border: none; border-radius: 8px;
+  cursor: pointer;
+}
+.announcement-action:hover { filter: brightness(1.1); }
+.announcement-close {
+  flex: none;
+  width: 32px; height: 32px;
+  font-size: 1.3rem; line-height: 1;
+  background: none; color: #aaa;
+  border: none; border-radius: 8px;
+  cursor: pointer;
+}
+.announcement-close:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+@media (max-width: 600px) {
+  .announcement { padding-left: 16px; flex-wrap: wrap; }
+  .announcement-text { flex-basis: calc(100% - 44px); }
+  .announcement-close { order: 2; }
+  .announcement-action { order: 3; }
+}
+
+/* Settings → Admin → Memo to users */
+.memo-admin { display: flex; flex-direction: column; gap: 10px; }
+.memo-input {
+  width: 100%; box-sizing: border-box;
+  padding: 10px 12px;
+  font: inherit; font-size: 0.9rem;
+  background: #111; color: #fff;
+  border: 1px solid #333; border-radius: 8px;
+  resize: vertical;
+}
+.memo-input:focus { outline: none; border-color: #10B981; }
+.memo-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.memo-check { display: flex; align-items: center; gap: 6px; color: #ccc; font-size: 0.85rem; cursor: pointer; }
+.memo-count { margin-left: auto; color: #777; font-size: 0.78rem; }
+.memo-admin > .settings-save-btn { align-self: flex-start; }
+.memo-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.memo-list li { padding: 10px 12px; border: 1px solid #282828; border-radius: 8px; }
+.memo-list p { margin: 0 0 4px; color: #ddd; font-size: 0.88rem; overflow-wrap: anywhere; }
+.memo-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: #888; font-size: 0.76rem; }
+.memo-meta .link-btn { margin-left: auto; font-size: 0.76rem; }
