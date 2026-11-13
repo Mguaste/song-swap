@@ -4,7 +4,7 @@ import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
 import { readPendingInvite, readPendingSource, clearPendingInvite, savePendingInvite, readPendingShare, clearPendingShare, readPendingSwap, readShareLinkId } from './lib/pending';
 import { registerServiceWorker, disablePush, restorePush } from './lib/push';
-import { buildSearchUrl } from './lib/platforms';
+import { buildSearchUrl, openSpotify } from './lib/platforms';
 import { NotFoundPrompt } from './components/NotFoundPrompt';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -199,10 +199,11 @@ function App() {
   const openWithLinks = (platformLinks, song) => {
     const preferred = platformLinks[preferredPlatform];
     if (preferred?.url) {
-      // Always the web link: phones hand open.spotify.com (and the others)
-      // to the installed app, and computers without the app play it in the
-      // browser instead of asking which app to use for a spotify: link.
-      window.open(preferred.url, '_blank');
+      // Web links by default: phones hand them to the installed app, and
+      // computers play them in the browser. Spotify can opt into the
+      // desktop app in Settings (per device).
+      if (preferredPlatform === 'spotify') openSpotify(preferred.url, preferred.nativeAppUriMobile);
+      else window.open(preferred.url, '_blank');
       return;
     }
     // Searched for and confirmed missing there: let them pick another service
@@ -245,7 +246,7 @@ function App() {
       } catch { /* lookup failed — fall back to Spotify below */ }
     }
     // Fallback: open in Spotify
-    if (song.spotifyUrl) window.open(song.spotifyUrl, '_blank');
+    openSpotify(song.spotifyUrl, song.spotifyUri);
   };
 
   // Called with a link (on paste) or with a click/key event (uses the input's value)

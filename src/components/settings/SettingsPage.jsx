@@ -4,10 +4,14 @@ import { DeleteAccount } from './DeleteAccount';
 import { AdminResetPassword } from './AdminResetPassword';
 import { AdminGrowth } from './AdminGrowth';
 import { NotificationSettings } from './NotificationSettings';
-import { PLATFORMS } from '../../lib/platforms';
+import { useState } from 'react';
+import { PLATFORMS, isPhone, getSpotifyOpen, setSpotifyOpen } from '../../lib/platforms';
 
 
 export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform, onPlatformChange, onAccountDeleted }) {
+  const [spotifyOpen, setSpotifyOpenState] = useState(getSpotifyOpen);
+  const changeSpotifyOpen = (value) => { setSpotifyOpen(value); setSpotifyOpenState(value); };
+
   return (
     <div id="settings-page">
       <button className="link-btn" id="settings-back" onClick={onBack}>← Back</button>
@@ -31,6 +35,18 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
             {PLATFORMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </div>
+        {preferredPlatform === 'spotify' && !isPhone() && (
+          <div className="settings-row">
+            <label className="settings-label">Spotify On This Computer</label>
+            <div className="settings-password-form">
+              <select className="platform-select" value={spotifyOpen} onChange={e => changeSpotifyOpen(e.target.value)}>
+                <option value="web">Browser</option>
+                <option value="app">Desktop app</option>
+              </select>
+              <p className="settings-hint">Choose Desktop app if Spotify is installed on this computer. Phones always use the app.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="settings-section">
