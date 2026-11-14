@@ -600,25 +600,27 @@ app.delete('/api/me', requireAuth, authLimiter, async (req, res) => {
 // Admin: give a user a temporary password (there's no email on file to send
 // a reset link to). Signs them out everywhere.
 // Admin Growth numbers: is anyone using invite and song links, and do they
-// turn into friendships? Last 7 days, last 30 days, all time.
+// turn into friendships? Last 24 hours, 7 days, 30 days, all time.
 app.get('/api/admin/stats', requireAdmin, async (req, res) => {
   const tz = RESET_TIMEZONE;
   const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
   // Friendships between other people: not involving the viewing admin or a test account
   const notMine = `f.requester_id <> $1 AND f.receiver_id <> $1
     AND NOT EXISTS (SELECT 1 FROM users t WHERE t.is_test AND t.id IN (f.requester_id, f.receiver_id))`;
-  const period = (col, extra = '') => ['7 days', '30 days', null].map((iv, i) =>
-    `COUNT(${extra || '*'}) FILTER (WHERE ${iv ? `${col} > NOW() - INTERVAL '${iv}'` : 'TRUE'})::int AS ${['week', 'month', 'total'][i]}`
+  const period = (col, extra = '') => ['24 hours', '7 days', '30 days', null].map((iv, i) =>
+    `COUNT(${extra || '*'}) FILTER (WHERE ${iv ? `${col} > NOW() - INTERVAL '${iv}'` : 'TRUE'})::int AS ${['day', 'week', 'month', 'total'][i]}`
   ).join(', ');
   const [counts, users, friends, others, otherRequests, otherAccepted, otherSongs, otherPairs] = await Promise.all([
     pool.query(
       `SELECT event,
+         COALESCE(SUM(count) FILTER (WHERE day > (NOW() AT TIME ZONE $1)::date - 1), 0)::int AS day,
          COALESCE(SUM(count) FILTER (WHERE day > (NOW() AT TIME ZONE $1)::date - 7), 0)::int AS week,
          COALESCE(SUM(count) FILTER (WHERE day > (NOW() AT TIME ZONE $1)::date - 30), 0)::int AS month,
          SUM(count)::int AS total
        FROM daily_counts GROUP BY event`, [tz]),
     pool.query(
-      `SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS week,
+      `SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS day,
+              COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS week,
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::int AS month,
               COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE EXISTS (
@@ -628,9 +630,11 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
        FROM users WHERE NOT is_test`),
     pool.query(
       `SELECT COALESCE(source, 'untracked') AS source,
+              COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS requests_day,
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS requests_week,
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::int AS requests_month,
               COUNT(*)::int AS requests_total,
+              COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '24 hours')::int AS accepted_day,
               COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '7 days')::int AS accepted_week,
               COUNT(*) FILTER (WHERE accepted_at > NOW() - INTERVAL '30 days')::int AS accepted_month,
               COUNT(*) FILTER (WHERE status = 'accepted')::int AS accepted_total
