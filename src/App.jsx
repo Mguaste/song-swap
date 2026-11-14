@@ -4,7 +4,7 @@ import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
 import { readPendingInvite, readPendingSource, clearPendingInvite, savePendingInvite, readPendingShare, clearPendingShare, readPendingSwap, readShareLinkId } from './lib/pending';
 import { registerServiceWorker, disablePush, restorePush } from './lib/push';
-import { buildSearchUrl, openSpotify } from './lib/platforms';
+import { buildSearchUrl, openSpotify, openSongLink } from './lib/platforms';
 import { NotFoundPrompt } from './components/NotFoundPrompt';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { Header } from './components/Header';
@@ -204,8 +204,7 @@ function App() {
       // Web links by default: phones hand them to the installed app, and
       // computers play them in the browser. Spotify can opt into the
       // desktop app in Settings (per device).
-      if (preferredPlatform === 'spotify') openSpotify(preferred.url, preferred.nativeAppUriMobile);
-      else window.open(preferred.url, '_blank');
+      openSongLink(preferredPlatform, preferred.url, preferred.nativeAppUriMobile);
       return;
     }
     // Searched for and confirmed missing there: let them pick another service
@@ -216,14 +215,14 @@ function App() {
     // Preferred platform not checked (or lookup failed) — use search URL if we have metadata
     if (song?.title && song?.artist) {
       const searchUrl = buildSearchUrl(preferredPlatform, song.title, song.artist);
-      if (searchUrl) { window.open(searchUrl, '_blank'); return; }
+      if (searchUrl) { openSongLink(preferredPlatform, searchUrl); return; }
     }
     // Final fallback: best available direct link
     for (const p of PLATFORM_PRIORITY) {
       const link = platformLinks[p];
-      if (link?.url) { window.open(link.url, '_blank'); return; }
+      if (link?.url) { openSongLink(p, link.url, link.nativeAppUriMobile); return; }
     }
-    if (song?.odesliPageUrl) window.open(song.odesliPageUrl, '_blank');
+    if (song?.odesliPageUrl) openSongLink(null, song.odesliPageUrl);
   };
 
   const openSong = async (song) => {

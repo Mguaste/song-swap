@@ -72,6 +72,7 @@ https://ko-fi.com/mguaste
 * [x] Settings → "Spotify on this computer": Browser (default) or Desktop app, saved per device; phones always use the app
 * [x] Memo to all users (Settings → Admin): banner shown once to everyone (live if online), optional "Open Settings" button; new accounts skip old memos
 * [x] Test accounts (`is_test`, TestTest) left out of all counts; Growth panel "Without me" section (friendships and swaps between other people)
+* [x] iPhone home-screen app: songs open straight in Spotify, Apple Music, Tidal and Deezer (no blank white screen left behind); other links close their browser sheet when you come back
 
 ### Future ideas
 Data check (Nov 2026): 21 users but only 3 friendships, so the most important work is getting people connected and coming back.

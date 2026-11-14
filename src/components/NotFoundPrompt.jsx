@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { PLATFORMS, buildSearchUrl } from '../lib/platforms';
+import { PLATFORMS, buildSearchUrl, openSongLink } from '../lib/platforms';
 
 // Shown when a song was searched for on the listener's own service and isn't
 // there: offer the services that do have it, or a search anyway.
@@ -26,14 +26,22 @@ export function NotFoundPrompt({ song, platformLinks, preferredPlatform, onClose
         <div className="notfound-options">
           {available.map(([key, name]) => (
             <a key={key} href={platformLinks[key].url} target="_blank" rel="noreferrer"
-              className="notfound-option" onClick={onClose}>
+              className="notfound-option" onClick={(e) => {
+                e.preventDefault();
+                openSongLink(key, platformLinks[key].url, platformLinks[key].nativeAppUriMobile);
+                onClose();
+              }}>
               {name}
             </a>
           ))}
         </div>
         <div className="notfound-footer">
           {searchUrl && (
-            <a href={searchUrl} target="_blank" rel="noreferrer" className="notfound-search" onClick={onClose}>
+            <a href={searchUrl} target="_blank" rel="noreferrer" className="notfound-search" onClick={(e) => {
+              e.preventDefault();
+              openSongLink(preferredPlatform, searchUrl);
+              onClose();
+            }}>
               Search {label} anyway
             </a>
           )}

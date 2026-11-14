@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import icon from '../assets/SSLogo.png';
 import { Avatar } from './Avatar';
-import { PLATFORMS, buildSearchUrl } from '../lib/platforms';
+import { PLATFORMS, buildSearchUrl, openSongLink } from '../lib/platforms';
 
 // /s/<id>: a song someone shared. Works without an account: play it in any
 // music app, then swap back (sign up, or add the sender if logged in).
@@ -66,7 +66,11 @@ export function SharedSongPage({ id, user, onSwapBack, onClose }) {
             const url = song.platformLinks?.[key]?.url ?? buildSearchUrl(key, song.title, song.artist);
             return url && (
               <a key={key} href={url} target="_blank" rel="noreferrer"
-                className={`shared-platform${key === preferred ? ' preferred' : ''}`}>
+                className={`shared-platform${key === preferred ? ' preferred' : ''}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  openSongLink(key, url, song.platformLinks?.[key]?.nativeAppUriMobile);
+                }}>
                 {isMissing(key) ? `Search ${label}` : label}
               </a>
             );
