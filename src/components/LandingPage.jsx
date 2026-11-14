@@ -2,8 +2,8 @@ import icon from '../assets/SSLogo.png';
 
 const FEATURES = [
   {
-    title: 'One song at a time',
-    body: 'Trade a single track at a time. No endless playlists, no algorithmic recommendations, just you and a friend sharing the music you love.',
+    title: 'Picked by a friend',
+    body: 'Every song comes from someone who chose it with you in mind. No endless playlists, no algorithmic recommendations, just you and a friend sharing the music you love.',
     icon: (
       <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
     ),
