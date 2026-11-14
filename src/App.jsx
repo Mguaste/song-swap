@@ -501,6 +501,7 @@ function App() {
       if (document.visibilityState !== 'visible' || !userRef.current) return;
       loadUnreadStatus(userRef.current);
       refreshActiveSwapRef.current();
+      loadFriends(); // whose turn may have changed, or midnight passed while asleep
       setDashTick(t => t + 1);
     };
     document.addEventListener('visibilitychange', onVisible);
@@ -560,6 +561,7 @@ function App() {
       // Catch up on anything sent while disconnected (server restart, phone sleep)
       loadUnreadStatus(user);
       refreshActiveSwapRef.current();
+      loadFriends();
     };
     socket.on('connect', joinRooms);
     socket.disconnect().connect();
@@ -582,7 +584,11 @@ function App() {
     socket.on('swap-read', ({ friendshipId }) => removeUnread(friendshipId));
     // Account deleted on another device, or password reset by an admin
     socket.on('force-logout', () => clearSessionRef.current());
-    socket.on('song-cleared', () => { setReceivedSong(null); setDashTick(t => t + 1); });
+    // Midnight clear: nobody has sent today, so every friend is back to "Send the first song"
+    socket.on('song-cleared', () => {
+      setReceivedSong(null); setDashTick(t => t + 1);
+      setFriends(prev => prev.map(f => ({ ...f, last_sent_by_me: null })));
+    });
     // Ratings change the match %, which comes with the friends list
     socket.on('song-rated', (u) => { applyRating(u); loadFriends(); });
     socket.on('all-songs-cleared', () => { setReceivedSong(null); setSongDetails(null); });
@@ -777,6 +783,7 @@ function App() {
               user={user}
               friendship={activeFriendship}
               match={activeMatch}
+              turn={friends.find(f => f.friendship_id === activeFriendship.friendship_id)?.last_sent_by_me}
               history={history}
               songDetails={songDetails}
               receivedSong={receivedSong}

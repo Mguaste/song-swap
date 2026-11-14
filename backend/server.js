@@ -1090,15 +1090,17 @@ app.get('/api/friends', requireAuth, async (req, res) => {
         WHERE a.user_id = CASE WHEN f.requester_id = $1 THEN u2.id ELSE u1.id END) AS friend_avatar_at,
        -- Latest song either way, or when the friendship started; the list is sorted by it
        COALESCE((SELECT MAX(sh.sent_at) FROM song_history sh WHERE sh.friendship_id = f.id), f.created_at) AS last_activity,
-       -- Whose turn: null = no songs yet, true = waiting on them, false = your turn
+       -- Whose turn, counting only songs since the midnight clear:
+       -- null = nobody has sent today, true = waiting on them, false = your turn
        (SELECT sh.sent_by = $2 FROM song_history sh WHERE sh.friendship_id = f.id
+          AND sh.sent_at >= (date_trunc('day', NOW() AT TIME ZONE $3) AT TIME ZONE $3)
         ORDER BY sh.sent_at DESC, sh.id DESC LIMIT 1) AS last_sent_by_me
      FROM friendships f
      JOIN users u1 ON u1.id = f.requester_id
      JOIN users u2 ON u2.id = f.receiver_id
      WHERE (f.requester_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'
      ORDER BY last_activity DESC, friend_name`,
-    [me[0].id, req.session.user.name]
+    [me[0].id, req.session.user.name, RESET_TIMEZONE]
   );
   const { rows: songs } = await pool.query(
     'SELECT friendship_id, sent_by, artist, rating FROM song_history WHERE friendship_id = ANY($1::int[])',

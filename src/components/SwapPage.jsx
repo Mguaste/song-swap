@@ -7,7 +7,7 @@ import { timeAgo } from '../lib/format';
 
 // One friend's swap: header, Send and Receive cards, history
 export function SwapPage({
-  user, friendship, match, history, songDetails, receivedSong,
+  user, friendship, match, turn, history, songDetails, receivedSong,
   songLink, sent, denied, verifying, verifyError, duplicate,
   onLinkChange, onLinkPaste, onVerify, onSend, onOpenSong, onRate, onRemove,
 }) {
@@ -24,9 +24,12 @@ export function SwapPage({
               : 'No songs swapped yet — send the first one'}
           </p>
           <MatchLine match={match} />
-          {history.length > 0 && (history[0].sentBy === user.name
-            ? <p className="swap-turn">Waiting on {friendship.friend_name}: you sent the last song</p>
-            : <p className="swap-turn yours">Your turn: {friendship.friend_name} sent “{history[0].title}”</p>)}
+          {/* turn: null = nobody has sent since midnight, true = waiting on them, false = your turn */}
+          {history.length > 0 && (turn == null
+            ? <p className="swap-turn">Send the first song today</p>
+            : turn
+              ? <p className="swap-turn">Waiting on {friendship.friend_name}: you sent the last song</p>
+              : <p className="swap-turn yours">Your turn: {friendship.friend_name} sent “{history[0].title}”</p>)}
         </div>
       </div>
       <div id="song-swap-main">
