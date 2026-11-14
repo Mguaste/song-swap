@@ -104,7 +104,7 @@ export const openSpotify = (webUrl, appUri) => {
 // App links for a song's web link, used in the installed iPhone app. Only
 // Apple Music's is documented; Tidal's and Deezer's are the commonly used
 // forms, and the web fallback covers them if the app doesn't open.
-// YouTube Music and Amazon Music have no known app link.
+// Amazon Music has no known app link.
 const iosAppUri = (platform, url) => {
   let m;
   if (platform === 'appleMusic' && /^https:\/\/music\.apple\.com\//i.test(url) && !/\/search\b/i.test(url)) {
@@ -115,6 +115,11 @@ const iosAppUri = (platform, url) => {
   }
   if (platform === 'deezer' && (m = /deezer\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?track\/(\d+)/i.exec(url))) {
     return `deezer://www.deezer.com/track/${m[1]}`;
+  }
+  // Undocumented; the YouTube Music app registers youtubemusic:, and this
+  // mirrors the music.youtube.com link the way music: does for Apple Music.
+  if (platform === 'youtubeMusic' && (m = /music\.youtube\.com\/watch\?(?:.*&)?v=([\w-]+)/i.exec(url))) {
+    return `youtubemusic://music.youtube.com/watch?v=${m[1]}`;
   }
   return null;
 };
