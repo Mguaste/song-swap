@@ -388,6 +388,11 @@
 .friend-item.active .friend-name {
   color: #fff;
 }
+.friend-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.friend-turn { font-size: 0.72rem; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.friend-turn.yours { color: #10B981; font-weight: 600; }
+.swap-turn { margin: 4px 0 0; font-size: 0.84rem; color: #888; }
+.swap-turn.yours { color: #10B981; font-weight: 600; }
 
 .dashboard-item {
   margin-bottom: 14px;

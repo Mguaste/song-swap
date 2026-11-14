@@ -100,7 +100,12 @@ export function Sidebar({
                   onClick={() => onSelectFriend(f)}
                 >
                   <Avatar userId={f.friend_id} avatarAt={f.friend_avatar_at} name={f.friend_name} />
-                  <span className="friend-name">{f.friend_name}</span>
+                  <span className="friend-text">
+                    <span className="friend-name">{f.friend_name}</span>
+                    <span className={`friend-turn${f.last_sent_by_me === false ? ' yours' : ''}`}>
+                      {f.last_sent_by_me == null ? 'Send the first song' : f.last_sent_by_me ? 'Waiting on them' : 'Your turn'}
+                    </span>
+                  </span>
                   {unread.has(f.friendship_id) && <span className="unread-dot" />}
                 </div>
               ))

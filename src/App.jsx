@@ -82,9 +82,10 @@ function App() {
   };
 
   // Move a friend to the top of the list when a song is sent or received
-  const bumpActivity = (friendshipId, sentAt) => setFriends(prev => prev.map(f =>
-    f.friendship_id === friendshipId && (!f.last_activity || new Date(sentAt) > new Date(f.last_activity))
-      ? { ...f, last_activity: sentAt } : f));
+  // A new song in a friendship: re-sort the list, and flip whose turn it is
+  const bumpActivity = (friendshipId, sentAt, byMe) => setFriends(prev => prev.map(f =>
+    f.friendship_id === friendshipId && (!f.last_activity || new Date(sentAt) >= new Date(f.last_activity))
+      ? { ...f, last_activity: sentAt, last_sent_by_me: byMe } : f));
 
   const loadFriends = async () => {
     const r = await fetch('/api/friends', { credentials: 'include' });
@@ -572,7 +573,7 @@ function App() {
       if (song.friendshipId === activeFriendshipRef.current?.friendship_id) setReceivedSong(song);
     });
     socket.on('swap-received', ({ friendshipId, sentAt }) => {
-      bumpActivity(friendshipId, sentAt);
+      bumpActivity(friendshipId, sentAt, false);
       const viewing = friendshipId === activeFriendshipRef.current?.friendship_id
         && document.visibilityState === 'visible';
       if (viewing) markRead(friendshipId);
@@ -589,7 +590,7 @@ function App() {
     socket.on('duplicate-song', (entry) => { setDuplicate(entry); setDenied(true); setTimeout(() => setDenied(false), 1500); });
     socket.on('send-error', ({ error }) => setVerifyError(error || 'Could not send that song'));
     socket.on('history-updated', (entry) => {
-      bumpActivity(entry.friendshipId, entry.sentAt);
+      bumpActivity(entry.friendshipId, entry.sentAt, entry.sentBy === userRef.current?.name);
       if (entry.friendshipId === activeFriendshipRef.current?.friendship_id) {
         setHistory(prev => [entry, ...prev]);
         if (entry.sentBy === userRef.current?.name) {

@@ -24,6 +24,9 @@ export function SwapPage({
               : 'No songs swapped yet — send the first one'}
           </p>
           <MatchLine match={match} />
+          {history.length > 0 && (history[0].sentBy === user.name
+            ? <p className="swap-turn">Waiting on {friendship.friend_name}: you sent the last song</p>
+            : <p className="swap-turn yours">Your turn: {friendship.friend_name} sent “{history[0].title}”</p>)}
         </div>
       </div>
       <div id="song-swap-main">
