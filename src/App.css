@@ -1944,7 +1944,7 @@ p.card-rating { flex-direction: row; justify-content: center; gap: 6px; }
 }
 .dash-invite-title { margin: 0; font-weight: 700; }
 .dash-invite-sub { margin: 2px 0 0; color: #b3b3b3; font-size: 0.82rem; }
-#dash-invite-btn {
+#dash-invite-btn, .notify-on-btn {
   padding: 9px 18px;
   font-family: inherit;
   font-size: 0.86rem;
@@ -1955,7 +1955,7 @@ p.card-rating { flex-direction: row; justify-content: center; gap: 6px; }
   border-radius: 24px;
   cursor: pointer;
 }
-#dash-invite-btn:hover { filter: brightness(1.1); }
+#dash-invite-btn:hover, .notify-on-btn:hover { filter: brightness(1.1); }
 
 .dash-share { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-color: #10B981; }
 .dash-share p { margin: 0; font-weight: 500; }
@@ -2094,6 +2094,12 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 
 .dash-notify { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border-color: #10B98155; }
 .dash-notify-actions { display: flex; align-items: center; gap: 14px; }
+.reply-notify {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin-top: 12px; padding: 12px 14px; text-align: left;
+  border: 1px solid #10B98155; border-radius: 12px;
+  background: linear-gradient(135deg, #10B98114, #181818);
+}
 .notif-msg { font-size: 0.82rem; color: #b3b3b3; }
 
 /* ── Song share links: "Send a song to anyone" card ── */

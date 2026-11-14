@@ -2,6 +2,7 @@ import { Avatar } from './Avatar';
 import { StarRating } from './StarRating';
 import { AlbumArtPlaceholder } from './AlbumArtPlaceholder';
 import { MatchLine } from './MatchLine';
+import { ReplyNotifyPrompt } from './ReplyNotifyPrompt';
 import { timeAgo } from '../lib/format';
 
 // One friend's swap: header, Send and Receive cards, history
@@ -83,6 +84,7 @@ export function SwapPage({
               Already sent on {new Date(duplicate.sentAt).toLocaleDateString()} by {duplicate.sentBy}
             </p>
           )}
+          <ReplyNotifyPrompt key={friendship.friendship_id} userId={user.id} friendName={friendship.friend_name} sent={sent} />
         </div>
 
         <div className="song-cont">
