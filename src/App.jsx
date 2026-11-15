@@ -16,6 +16,7 @@ import { LandingPage } from './components/LandingPage';
 import { AuthScreen } from './components/AuthScreen';
 import { SharedSongPage } from './components/SharedSongPage';
 import { SettingsPage } from './components/settings/SettingsPage';
+import { AdminPage } from './components/AdminPage';
 
 function App() {
   const [user, setUser] = useState(undefined);
@@ -60,6 +61,7 @@ function App() {
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [preferredPlatform, setPreferredPlatform] = useState('spotify');
   // Song confirmed missing on the preferred service: { song, platformLinks }
   const [notFoundChoice, setNotFoundChoice] = useState(null);
@@ -173,6 +175,7 @@ function App() {
     setActiveFriendship(fresh);
     activeFriendshipRef.current = fresh;
     setShowSettings(false);
+    setShowAdmin(false);
     if (window.innerWidth <= 700) setSidebarOpen(false);
     setSongLink('');
     setSongDetails(null);
@@ -343,6 +346,41 @@ function App() {
     closeFriendship(f.friendship_id);
   };
 
+  // Block a friend from the swap page: removes them and their history, and
+  // stops them from adding you again.
+  const blockFriend = async (f) => {
+    if (!f) return;
+    if (!window.confirm(`Block ${f.friend_name}? This removes them, deletes your swap history, and stops them from adding you again.`)) return;
+    const r = await fetch('/api/blocks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ userId: f.friend_id }),
+    });
+    if (!r.ok) { setVerifyError('Could not block — try again'); return; }
+    closeFriendship(f.friendship_id);
+    loadRequests();
+  };
+
+  const reportFriend = async (f) => {
+    if (!f) return;
+    const reason = window.prompt(`Report ${f.friend_name} to the admins? Add a note (optional):`, '');
+    if (reason === null) return; // cancelled
+    const r = await fetch('/api/reports', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ userId: f.friend_id, reason }),
+    });
+    window.alert(r.ok ? 'Thanks — the report has been sent to the admins.' : 'Could not send the report — try again.');
+  };
+
+  // Block someone from a pending friend request (declines it too)
+  const blockRequest = async (req) => {
+    if (!window.confirm(`Block ${req.from_name}? They won't be able to send you requests.`)) return;
+    await fetch('/api/blocks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ friendCode: req.from_code }),
+    }).catch(() => {});
+    loadRequests();
+  };
+
   // Leave a friendship's view after it's removed (by either person)
   const closeFriendship = (friendshipId) => {
     setUnreadFriendships(prev => { const next = new Set(prev); next.delete(friendshipId); return next; });
@@ -375,6 +413,7 @@ function App() {
     activeFriendshipRef.current = null;
     setActiveFriendship(null);
     setShowSettings(false);
+    setShowAdmin(false);
     setSongLink('');
     setSongDetails(null);
     setReceivedSong(null);
@@ -410,6 +449,7 @@ function App() {
   const clearSession = () => {
     setUser(null);
     setShowSettings(false);
+    setShowAdmin(false);
     // Clear the ref too, or the next account to log in on this tab inherits
     // the old open swap and it gets marked read for them
     activeFriendshipRef.current = null;
@@ -457,10 +497,13 @@ function App() {
 
   const cancelShare = () => { pendingShareRef.current = null; setPendingShare(null); clearPendingShare(); };
 
-  // The Admin button opens Settings at the admin tools
+  // The Admin button opens the dedicated admin page
   const openAdmin = () => {
-    setShowSettings(true);
-    setTimeout(() => document.getElementById('settings-admin')?.scrollIntoView({ behavior: 'smooth' }), 50);
+    setShowAdmin(true);
+    setShowSettings(false);
+    activeFriendshipRef.current = null;
+    setActiveFriendship(null);
+    if (window.innerWidth <= 700) setSidebarOpen(false);
   };
 
   // ── Effects (after the functions they use) ──
@@ -510,13 +553,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Escape closes the Settings page
+  // Escape closes the Settings or Admin page
   useEffect(() => {
-    if (!showSettings) return;
-    const onKey = (e) => { if (e.key === 'Escape') setShowSettings(false); };
+    if (!showSettings && !showAdmin) return;
+    const onKey = (e) => { if (e.key === 'Escape') { setShowSettings(false); setShowAdmin(false); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [showSettings]);
+  }, [showSettings, showAdmin]);
 
   // On login (or a new user object): load lists, apply a pending invite/share,
   // and reconnect the socket with the session cookie
@@ -707,13 +750,13 @@ function App() {
         showSettings={showSettings}
         onToggleSidebar={() => setSidebarOpen(v => !v)}
         onHome={goHome}
-        onToggleSettings={() => setShowSettings(v => !v)}
+        onToggleSettings={() => { setShowSettings(v => !v); setShowAdmin(false); }}
         onOpenAdmin={openAdmin}
         onLogout={logout}
       />
       <AnnouncementBanner
         refreshKey={`${user.id}|${memoTick}`}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => { setShowSettings(true); setShowAdmin(false); }}
       />
 
       <div id="app-body">
@@ -734,16 +777,19 @@ function App() {
           sentRequests={sentRequests}
           onAccept={acceptRequest}
           onDecline={declineRequest}
+          onBlockRequest={blockRequest}
           friends={friends}
           activeFriendshipId={activeFriendship?.friendship_id}
           unread={unreadFriendships}
           onSelectFriend={selectFriend}
           onDashboard={goHome}
-          dashboardActive={!activeFriendship && !showSettings}
+          dashboardActive={!activeFriendship && !showSettings && !showAdmin}
         />
 
         <main id="main-content">
-          {showSettings ? (
+          {showAdmin ? (
+            <AdminPage onBack={() => setShowAdmin(false)} />
+          ) : showSettings ? (
             <SettingsPage
               user={user}
               onBack={() => setShowSettings(false)}
@@ -800,6 +846,8 @@ function App() {
               onOpenSong={openSong}
               onRate={rateSong}
               onRemove={removeFriend}
+              onBlock={blockFriend}
+              onReport={reportFriend}
             />
           )}
         </main>

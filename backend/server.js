@@ -168,6 +168,31 @@ const initDb = async () => {
   await pool.query(`UPDATE users SET is_admin = TRUE
     WHERE LOWER(name) = 'mguaste' AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin)`);
 
+  // Moderation. A block removes any friendship/requests between the two people
+  // and stops new ones; a report goes to the admin queue. A banned user is
+  // signed out everywhere and can't log back in.
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE');
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_blocks (
+      blocker_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (blocker_id, blocked_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_reports (
+      id SERIAL PRIMARY KEY,
+      reporter_id INT REFERENCES users(id) ON DELETE SET NULL,
+      reported_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // Song share links can optionally expire
+  await pool.query('ALTER TABLE song_shares ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ');
+
   // Generate friend codes for existing users that don't have one
   const { rows: needsCodes } = await pool.query('SELECT id FROM users WHERE friend_code IS NULL');
   for (const user of needsCodes) {
@@ -295,6 +320,9 @@ app.use(sessionMiddleware);
 // Give sockets the same session as HTTP requests, so socket events can be
 // tied to the logged-in user instead of trusting names the client sends
 io.engine.use(sessionMiddleware);
+
+// Lightweight health check for uptime monitoring (no DB, no auth)
+app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // Re-read the session from the store on every event, so a logout or expiry
 // after the socket connected is respected. Resolves to { name } or null.
@@ -596,6 +624,7 @@ app.post('/api/login', authLimiter, async (req, res) => {
   }
   const valid = await bcrypt.compare(password, rows[0].password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
+  if (rows[0].is_banned) return res.status(403).json({ error: 'This account has been suspended.' });
   await regenerateSession(req);
   req.session.user = { name: rows[0].name };
   res.json(req.session.user);
@@ -783,6 +812,64 @@ app.post('/api/admin/reset-password', requireAdmin, async (req, res) => {
   await signOutEverywhere(name);
   kickSockets(name);
   res.json({ name, tempPassword });
+});
+
+// ── Admin: reports, bans, and a shares overview ──
+app.get('/api/admin/reports', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT r.id, r.reason, r.status, r.created_at,
+            rep.name AS reporter_name,
+            u.id AS reported_id, u.name AS reported_name, u.is_banned, u.is_admin AS reported_is_admin
+     FROM user_reports r
+     LEFT JOIN users rep ON rep.id = r.reporter_id
+     JOIN users u ON u.id = r.reported_id
+     ORDER BY (r.status = 'open') DESC, r.created_at DESC
+     LIMIT 100`
+  );
+  res.json(rows);
+});
+
+app.post('/api/admin/reports/:id/dismiss', requireAdmin, async (req, res) => {
+  await pool.query("UPDATE user_reports SET status = 'dismissed' WHERE id = $1", [parseInt(req.params.id, 10) || 0]);
+  res.json({ success: true });
+});
+
+app.post('/api/admin/users/:id/ban', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid user' });
+  const { rows } = await pool.query('SELECT name, is_admin FROM users WHERE id = $1', [id]);
+  if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+  if (rows[0].is_admin) return res.status(400).json({ error: 'You cannot ban an admin' });
+  await pool.query('UPDATE users SET is_banned = TRUE WHERE id = $1', [id]);
+  await pool.query("UPDATE user_reports SET status = 'actioned' WHERE reported_id = $1 AND status = 'open'", [id]);
+  await signOutEverywhere(rows[0].name);
+  kickSockets(rows[0].name);
+  res.json({ success: true });
+});
+
+app.post('/api/admin/users/:id/unban', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid user' });
+  await pool.query('UPDATE users SET is_banned = FALSE WHERE id = $1', [id]);
+  res.json({ success: true });
+});
+
+app.get('/api/admin/shares', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.title, s.artist, s.created_at, s.expires_at, u.name AS owner
+     FROM song_shares s JOIN users u ON u.id = s.user_id
+     ORDER BY s.created_at DESC LIMIT 200`
+  );
+  res.json(rows.map(r => ({
+    id: r.id, title: r.title, artist: r.artist, owner: r.owner,
+    createdAt: r.created_at, expiresAt: r.expires_at,
+    expired: !!r.expires_at && new Date(r.expires_at) <= new Date(),
+  })));
+});
+
+app.delete('/api/admin/shares/:id', requireAdmin, async (req, res) => {
+  await pool.query('DELETE FROM song_shares WHERE id = $1', [req.params.id]);
+  res.json({ success: true });
 });
 
 // Names of everyone with a friendship or pending request with this user
@@ -1003,11 +1090,36 @@ const loadShare = async (id) => {
             u.id AS from_id, u.name AS from_name, u.friend_code AS from_code, a.updated_at AS from_avatar_at
      FROM song_shares s JOIN users u ON u.id = s.user_id
      LEFT JOIN user_avatars a ON a.user_id = u.id
-     WHERE s.id = $1`,
+     WHERE s.id = $1 AND (s.expires_at IS NULL OR s.expires_at > NOW())`,
     [id]
   );
   return rows[0] ?? null;
 };
+
+// Your own share links, to review or revoke (must be before /api/shares/:id)
+app.get('/api/shares/mine', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.title, s.artist, s.album_art, s.created_at, s.expires_at
+     FROM song_shares s JOIN users u ON u.id = s.user_id
+     WHERE u.name = $1 ORDER BY s.created_at DESC LIMIT 100`,
+    [req.session.user.name]
+  );
+  res.json(rows.map(r => ({
+    id: r.id, title: r.title, artist: r.artist, albumArt: r.album_art,
+    createdAt: r.created_at, expiresAt: r.expires_at,
+    url: `${req.protocol}://${req.get('host')}/s/${r.id}`,
+    expired: !!r.expires_at && new Date(r.expires_at) <= new Date(),
+  })));
+});
+
+app.delete('/api/shares/:id', requireAuth, async (req, res) => {
+  const { rowCount } = await pool.query(
+    'DELETE FROM song_shares WHERE id = $1 AND user_id = (SELECT id FROM users WHERE name = $2)',
+    [req.params.id, req.session.user.name]
+  );
+  if (!rowCount) return res.status(404).json({ error: 'Share not found' });
+  res.json({ success: true });
+});
 
 // Public: the shared song and who sent it (their friend code, so the page
 // can send them a friend request; sharing the link shares the code)
@@ -1038,6 +1150,12 @@ app.post('/api/friends/add', requireAuth, perUserLimit(friendAddLimiter), async 
   const theirName = target[0].name;
 
   if (myId === theirId) return res.status(400).json({ error: 'You cannot add yourself' });
+
+  const { rows: blocked } = await pool.query(
+    'SELECT 1 FROM user_blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)',
+    [myId, theirId]
+  );
+  if (blocked.length) return res.status(403).json({ error: "You can't add this person" });
 
   const { rows: existing } = await pool.query(
     'SELECT id, status, requester_id FROM friendships WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)',
@@ -1173,6 +1291,101 @@ app.delete('/api/friends/:id', requireAuth, async (req, res) => {
   io.in(`friendship-${id}`).socketsLeave(`friendship-${id}`);
   for (const n of names) io.to(`user-${n}`).emit('friendship-removed', { friendshipId: id });
   res.json({ success: true });
+});
+
+// ── Blocking & reporting ──
+const MOD_WINDOW_MS = 60 * 60 * 1000;
+const blockLimiter = makeRateLimiter(60, MOD_WINDOW_MS);  // 60/hour per user
+const reportLimiter = makeRateLimiter(20, MOD_WINDOW_MS); // 20/hour per user
+const REPORT_MAX = 500;
+
+// Block a user: drop any friendship/requests between you two, then stop new ones
+app.post('/api/blocks', requireAuth, perUserLimit(blockLimiter), async (req, res) => {
+  const { userId, friendCode } = req.body ?? {};
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  const myId = me[0].id;
+  // Target by user id (from a swap) or friend code (from a pending request)
+  let target;
+  if (Number.isInteger(Number(userId))) {
+    ({ rows: target } = await pool.query('SELECT id, name FROM users WHERE id = $1', [Number(userId)]));
+  } else if (typeof friendCode === 'string' && friendCode) {
+    ({ rows: target } = await pool.query('SELECT id, name FROM users WHERE friend_code = $1', [friendCode.toUpperCase()]));
+  } else {
+    return res.status(400).json({ error: 'Invalid user' });
+  }
+  if (!target || target.length === 0) return res.status(404).json({ error: 'User not found' });
+  const targetId = target[0].id;
+  if (targetId === myId) return res.status(400).json({ error: 'You cannot block yourself' });
+
+  const client = await pool.connect();
+  let affected;
+  try {
+    await client.query('BEGIN');
+    await client.query('INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [myId, targetId]);
+    const { rows: fs } = await client.query(
+      `SELECT id, status FROM friendships
+       WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)`,
+      [myId, targetId]
+    );
+    affected = fs;
+    const ids = fs.map(f => f.id);
+    if (ids.length) {
+      await client.query('DELETE FROM song_history WHERE friendship_id = ANY($1::int[])', [ids]);
+      await client.query('DELETE FROM friendships WHERE id = ANY($1::int[])', [ids]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  const myName = req.session.user.name, theirName = target[0].name;
+  for (const f of affected) {
+    delete lastSentByFriendship[f.id];
+    io.in(`friendship-${f.id}`).socketsLeave(`friendship-${f.id}`);
+    if (f.status === 'accepted') {
+      io.to(`user-${myName}`).emit('friendship-removed', { friendshipId: f.id });
+      io.to(`user-${theirName}`).emit('friendship-removed', { friendshipId: f.id });
+    } else {
+      io.to(`user-${myName}`).emit('friend-request-declined');
+      io.to(`user-${theirName}`).emit('friend-request-declined');
+    }
+  }
+  res.json({ success: true });
+});
+
+app.delete('/api/blocks/:userId', requireAuth, async (req, res) => {
+  const targetId = Number(req.params.userId);
+  if (!Number.isInteger(targetId)) return res.status(400).json({ error: 'Invalid user' });
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  await pool.query('DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2', [me[0].id, targetId]);
+  res.json({ success: true });
+});
+
+app.get('/api/blocks', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.name, b.created_at
+     FROM user_blocks b
+     JOIN users me ON me.name = $1 AND me.id = b.blocker_id
+     JOIN users u ON u.id = b.blocked_id
+     ORDER BY b.created_at DESC`,
+    [req.session.user.name]
+  );
+  res.json(rows);
+});
+
+// Report a user; admins review these in the Admin page
+app.post('/api/reports', requireAuth, perUserLimit(reportLimiter), async (req, res) => {
+  const targetId = Number(req.body?.userId);
+  const reason = String(req.body?.reason ?? '').trim().slice(0, REPORT_MAX);
+  if (!Number.isInteger(targetId)) return res.status(400).json({ error: 'Invalid user' });
+  const { rows: me } = await pool.query('SELECT id FROM users WHERE name = $1', [req.session.user.name]);
+  if (targetId === me[0].id) return res.status(400).json({ error: 'You cannot report yourself' });
+  const { rows: target } = await pool.query('SELECT id FROM users WHERE id = $1', [targetId]);
+  if (target.length === 0) return res.status(404).json({ error: 'User not found' });
+  await pool.query('INSERT INTO user_reports (reporter_id, reported_id, reason) VALUES ($1, $2, $3)', [me[0].id, targetId, reason || null]);
+  res.status(201).json({ success: true });
 });
 
 // List accepted friends
@@ -2040,11 +2253,15 @@ app.post('/api/shares', requireAuth, async (req, res) => {
   shareCounts.set(me[0].id, entry);
   if (!me[0].is_test) countEvent('share_created');
 
+  const ALLOWED_EXPIRY_DAYS = [1, 7, 30];
+  const days = Number(req.body?.expiresInDays);
+  const expiresAt = ALLOWED_EXPIRY_DAYS.includes(days) ? new Date(Date.now() + days * 864e5) : null;
+
   const id = newShareId();
   await pool.query(
-    `INSERT INTO song_shares (id, user_id, title, artist, album, album_art, platform_links, source_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [id, me[0].id, song.title, song.artist, song.album, song.albumArt, JSON.stringify(song.platformLinks), song.sourceUrl]
+    `INSERT INTO song_shares (id, user_id, title, artist, album, album_art, platform_links, source_url, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [id, me[0].id, song.title, song.artist, song.album, song.albumArt, JSON.stringify(song.platformLinks), song.sourceUrl, expiresAt]
   );
   res.status(201).json({ id, url: `${req.protocol}://${req.get('host')}/s/${id}`, song });
 });

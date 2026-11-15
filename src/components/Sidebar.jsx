@@ -4,7 +4,7 @@ import { Avatar } from './Avatar';
 export function Sidebar({
   user, open, onClose, copied, onCopyCode, inviteCopied, onShareInvite,
   addCode, onAddCodeChange, onAddFriend, addCodeError, addCodeSuccess,
-  friendRequests, sentRequests, onAccept, onDecline,
+  friendRequests, sentRequests, onAccept, onDecline, onBlockRequest,
   friends, activeFriendshipId, unread, onSelectFriend,
   onDashboard, dashboardActive,
 }) {
@@ -51,8 +51,9 @@ export function Sidebar({
                 <div key={req.id} className="request-item">
                   <span className="request-name">{req.from_name}</span>
                   <div className="request-actions">
-                    <button className="accept-btn" onClick={() => onAccept(req.id)}>✓</button>
-                    <button className="decline-btn" onClick={() => onDecline(req.id)}>✕</button>
+                    <button className="accept-btn" title="Accept" onClick={() => onAccept(req.id)}>✓</button>
+                    <button className="decline-btn" title="Decline" onClick={() => onDecline(req.id)}>✕</button>
+                    <button className="block-btn" title={`Block ${req.from_name}`} aria-label={`Block ${req.from_name}`} onClick={() => onBlockRequest(req)}>⊘</button>
                   </div>
                 </div>
               ))}

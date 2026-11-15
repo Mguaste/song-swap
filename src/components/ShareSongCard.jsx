@@ -8,6 +8,7 @@ export function ShareSongCard() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [expiresInDays, setExpiresInDays] = useState(0); // 0 = never
 
   const create = async (value = link) => {
     if (!value.trim() || busy) return;
@@ -18,7 +19,7 @@ export function ShareSongCard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ link: value.trim() }),
+        body: JSON.stringify({ link: value.trim(), expiresInDays: expiresInDays || undefined }),
       });
       const d = await r.json().catch(() => ({}));
       if (r.ok) { setResult(d); setLink(''); }
@@ -77,6 +78,13 @@ export function ShareSongCard() {
           <button className="share-song-btn" onClick={() => create()} disabled={busy || !link.trim()}>
             {busy ? 'Finding…' : 'Make link'}
           </button>
+          <select className="share-song-expiry" value={expiresInDays} aria-label="Link expiry"
+            onChange={e => setExpiresInDays(Number(e.target.value))}>
+            <option value={0}>Never expires</option>
+            <option value={1}>Expires in 1 day</option>
+            <option value={7}>Expires in 7 days</option>
+            <option value={30}>Expires in 30 days</option>
+          </select>
         </div>
       )}
       {error && <p className="share-song-error">{error}</p>}

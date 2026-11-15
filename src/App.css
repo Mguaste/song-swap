@@ -1687,7 +1687,10 @@ img.album-art {
 
 #remove-friend-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
+  gap: 10px 16px;
   padding: 24px 0 32px;
 }
 
@@ -2377,3 +2380,63 @@ img.friend-avatar.avatar-img { object-fit: cover; background: #2a2a2a; }
 .memo-list p { margin: 0 0 4px; color: #ddd; font-size: 0.88rem; overflow-wrap: anywhere; }
 .memo-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: #888; font-size: 0.76rem; }
 .memo-meta .link-btn { margin-left: auto; font-size: 0.76rem; }
+
+/* ── Moderation: block/report, admin reports, shares management ── */
+
+/* Block button on a pending friend request */
+.block-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 0.85rem;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #888;
+  cursor: pointer;
+  font-weight: 700;
+  transition: border-color 0.15s, color 0.15s;
+}
+.block-btn:hover { border-color: #ff5555; color: #ff5555; }
+
+/* Report/Block links under a swap */
+.danger-link { color: #888; }
+.danger-link:hover { color: #ff5555; }
+
+/* Share-link expiry picker */
+.share-song-expiry {
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: #121212;
+  color: #ddd;
+  border: 1px solid #282828;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.share-song-expiry:focus { outline: none; border-color: #10B981; }
+
+/* Admin reports */
+.report-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.report-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #282828; border-radius: 8px; }
+.report-item.status-dismissed, .report-item.status-actioned { opacity: 0.6; }
+.report-main { flex: 1; min-width: 0; }
+.report-who { display: flex; align-items: center; gap: 6px; color: #eee; font-size: 0.9rem; }
+.report-tag { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: #888; border: 1px solid #444; border-radius: 4px; padding: 1px 5px; }
+.report-tag.banned { color: #ff5555; border-color: #ff5555; }
+.report-meta { display: block; color: #888; font-size: 0.76rem; margin-top: 2px; }
+.report-reason { margin: 6px 0 0; color: #ccc; font-size: 0.85rem; overflow-wrap: anywhere; }
+.report-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+
+/* Admin + personal shares lists */
+.share-admin-list, .my-shares-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.share-admin-item, .my-share-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #282828; border-radius: 8px; }
+.share-admin-item.expired, .my-share-item.expired { opacity: 0.55; }
+.share-admin-text, .my-share-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.share-admin-title, .my-share-title { color: #eee; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-admin-meta, .my-share-meta { color: #888; font-size: 0.76rem; margin-top: 2px; }
+.my-share-item .link-btn { flex-shrink: 0; }
+
+/* Blocked users (Settings) */
+.blocked-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.blocked-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid #282828; border-radius: 8px; }
+.blocked-name { flex: 1; color: #eee; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

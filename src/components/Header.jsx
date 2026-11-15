@@ -14,7 +14,7 @@ export function Header({ user, unreadCount, showSettings, onToggleSidebar, onHom
       <div id="user-info">
         <span id="user-name">{user.name}</span>
         {user.is_admin && (
-          <button id="admin-btn" onClick={onOpenAdmin} title="Admin tools are in Settings">Admin</button>
+          <button id="admin-btn" onClick={onOpenAdmin} title="Admin">Admin</button>
         )}
         <button id="settings-btn" className={showSettings ? 'active' : ''} onClick={onToggleSettings}
           aria-label={showSettings ? 'Close settings' : 'Settings'} aria-pressed={showSettings}

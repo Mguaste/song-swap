@@ -9,7 +9,7 @@ import { timeAgo } from '../lib/format';
 export function SwapPage({
   user, friendship, match, turn, history, songDetails, receivedSong,
   songLink, sent, denied, verifying, verifyError, duplicate,
-  onLinkChange, onLinkPaste, onVerify, onSend, onOpenSong, onRate, onRemove,
+  onLinkChange, onLinkPaste, onVerify, onSend, onOpenSong, onRate, onRemove, onBlock, onReport,
 }) {
   return (
     <>
@@ -136,6 +136,8 @@ export function SwapPage({
 
       <div id="remove-friend-row">
         <button id="remove-friend-btn" onClick={onRemove}>Remove {friendship.friend_name}</button>
+        <button className="link-btn danger-link" onClick={() => onReport(friendship)}>Report</button>
+        <button className="link-btn danger-link" onClick={() => onBlock(friendship)}>Block</button>
       </div>
     </>
   );

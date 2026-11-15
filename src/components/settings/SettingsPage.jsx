@@ -1,9 +1,8 @@
 import { ProfileSettings } from './ProfileSettings';
 import { ChangePassword } from './ChangePassword';
 import { DeleteAccount } from './DeleteAccount';
-import { AdminResetPassword } from './AdminResetPassword';
-import { AdminGrowth } from './AdminGrowth';
-import { AdminAnnouncements } from './AdminAnnouncements';
+import { MyShares } from './MyShares';
+import { BlockedUsers } from './BlockedUsers';
 import { NotificationSettings } from './NotificationSettings';
 import { useState } from 'react';
 import { PLATFORMS, isPhone, getSpotifyOpen, setSpotifyOpen } from '../../lib/platforms';
@@ -58,31 +57,15 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
         </div>
       </div>
 
-      {user.is_admin && (
-        <div className="settings-section" id="settings-admin">
-          <h2 className="settings-section-title">Admin</h2>
-          <div className="settings-row settings-row-block">
-            <label className="settings-label">Growth</label>
-            <AdminGrowth />
-          </div>
-          <div className="settings-row settings-row-block">
-            <label className="settings-label">Memo to Users</label>
-            <AdminAnnouncements />
-          </div>
-          <div className="settings-row">
-            <label className="settings-label">History</label>
-            <button className="settings-danger-btn" onClick={() => fetch('/api/admin/history', { method: 'DELETE', credentials: 'include' })}>Clear All History</button>
-          </div>
-          <div className="settings-row">
-            <label className="settings-label">Current Songs</label>
-            <button className="settings-danger-btn" onClick={() => fetch('/api/admin/current-song', { method: 'DELETE', credentials: 'include' })}>Clear Current Songs</button>
-          </div>
-          <div className="settings-row">
-            <label className="settings-label">Reset Password</label>
-            <AdminResetPassword />
-          </div>
-        </div>
-      )}
+      <div className="settings-section">
+        <h2 className="settings-section-title">Your song links</h2>
+        <MyShares />
+      </div>
+
+      <div className="settings-section">
+        <h2 className="settings-section-title">Blocked users</h2>
+        <BlockedUsers />
+      </div>
 
       <div className="settings-section">
         <h2 className="settings-section-title">Danger Zone</h2>
