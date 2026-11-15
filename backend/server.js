@@ -284,7 +284,10 @@ const sessionMiddleware = session({
   cookie: {
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    // 'lax' is enough because the frontend is served from the same origin as
+    // the API; it also narrows CSRF exposure. (Switch back to 'none' only if
+    // the frontend ever moves to a different origin from this server.)
+    sameSite: 'lax',
     httpOnly: true,
   },
 });
@@ -312,6 +315,45 @@ const isFriendshipMember = async (userName, friendshipId) => {
   );
   return rows.length > 0;
 };
+
+// send-song is a raw socket API — the song object comes straight from the
+// client, so it's never trusted. Links from it are later handed to
+// window.location/window.open on the recipient's device, so any field that
+// isn't a plain https URL (or a known music-app-scheme URI) is dropped, which
+// is what stops a javascript:/data: URL from running as the recipient.
+const cleanStr = (v, max = 500) => (typeof v === 'string' ? v.slice(0, max) : null);
+const cleanHttpsUrl = (v) => (typeof v === 'string' && /^https:\/\//i.test(v) ? v.slice(0, 2000) : null);
+const APP_URI_RE = /^(?:spotify:|music:|tidal:\/\/|deezer:\/\/|youtubemusic:\/\/)/i;
+const cleanAppUri = (v) => (typeof v === 'string' && APP_URI_RE.test(v) ? v.slice(0, 2000) : null);
+const cleanSourceUrl = (v) => cleanHttpsUrl(v) ?? cleanAppUri(v);
+const SONG_PLATFORM_KEYS = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal', 'deezer'];
+const cleanPlatformLinks = (links) => {
+  if (!links || typeof links !== 'object') return null;
+  const out = {};
+  for (const key of SONG_PLATFORM_KEYS) {
+    const v = links[key];
+    if (!v || typeof v !== 'object') continue;
+    if (v.notFound === true) { out[key] = { notFound: true }; continue; }
+    const entry = {};
+    const url = cleanHttpsUrl(v.url);
+    if (url) entry.url = url;
+    const native = cleanAppUri(v.nativeAppUriMobile);
+    if (native) entry.nativeAppUriMobile = native;
+    if (Object.keys(entry).length) out[key] = entry;
+  }
+  return Object.keys(out).length ? out : null;
+};
+const sanitizeSong = (song) => ({
+  title: cleanStr(song.title),
+  artist: cleanStr(song.artist),
+  album: cleanStr(song.album),
+  albumArt: cleanHttpsUrl(song.albumArt),
+  spotifyUri: cleanAppUri(song.spotifyUri),
+  spotifyUrl: cleanHttpsUrl(song.spotifyUrl),
+  platformLinks: cleanPlatformLinks(song.platformLinks),
+  sourceUrl: cleanSourceUrl(song.sourceUrl),
+  odesliPageUrl: cleanHttpsUrl(song.odesliPageUrl),
+});
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -343,9 +385,14 @@ io.on('connection', (socket) => {
     try {
       const user = await socketUser(socket);
       if (!user) return socket.emit('send-error', { error: 'Your session expired — log in again' });
+      if (!sendSongLimiter(user.name)) return socket.emit('send-error', { error: 'Slow down a moment — try again shortly' });
       if (!song?.title || !(await isFriendshipMember(user.name, rawId))) {
         return socket.emit('send-error', { error: 'You can only send songs to your friends' });
       }
+      // Never trust the client's song object: scrub it before it's stored and
+      // later opened on the recipient's device
+      song = sanitizeSong(song);
+      if (!song.title) return socket.emit('send-error', { error: 'Could not send that song — try again' });
       const sentBy = user.name;
       const friendshipId = Number(rawId);
       const { rows: dup } = await pool.query(
@@ -466,12 +513,52 @@ setInterval(() => {
   for (const [ip, e] of authAttempts) if (e.start < cutoff) authAttempts.delete(ip);
 }, AUTH_WINDOW_MS).unref();
 
+// Generic in-memory per-key limiter: returns true while under `max` events per
+// `windowMs`. Used to cap per-user abuse of expensive or spammable endpoints.
+const makeRateLimiter = (max, windowMs) => {
+  const hits = new Map();
+  setInterval(() => {
+    const cutoff = Date.now() - windowMs;
+    for (const [k, e] of hits) if (e.start < cutoff) hits.delete(k);
+  }, windowMs).unref();
+  return (key) => {
+    const now = Date.now();
+    const e = hits.get(key) ?? { count: 0, start: now };
+    if (now - e.start > windowMs) { e.count = 0; e.start = now; }
+    e.count++;
+    hits.set(key, e);
+    return e.count <= max;
+  };
+};
+// /api/verify fans out to several third-party music APIs; friends/add can be
+// scripted to enumerate friend codes or spam requests. Ceilings sit well above
+// normal human use.
+const verifyLimiter = makeRateLimiter(60, 60 * 1000);       // 60/min per user
+const friendAddLimiter = makeRateLimiter(20, 60 * 1000);    // 20/min per user
+const sendSongLimiter = makeRateLimiter(30, 60 * 1000);     // 30/min per user
+// Rejects when the current user is over `limiter`'s ceiling (use after requireAuth)
+const perUserLimit = (limiter) => (req, res, next) =>
+  limiter(req.session.user.name) ? next() : res.status(429).json({ error: 'Too many requests — slow down a moment' });
+
+// A valid bcrypt hash no password matches, compared against on a login miss so
+// a nonexistent username takes the same time as a wrong password (no timing
+// oracle for whether an account exists)
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('login-miss-placeholder', 10);
+
+// Rotate the session id when a user authenticates, so a session fixed before
+// login can't be reused afterward
+const MAX_PASSWORD = 200;
+const regenerateSession = (req) => new Promise((resolve, reject) => {
+  req.session.regenerate((err) => (err ? reject(err) : resolve()));
+});
+
 app.post('/api/register', authLimiter, async (req, res) => {
   const { name, password, preferredPlatform, ref } = req.body;
   const trimmed = name?.trim();
   if (!trimmed || !password) return res.status(400).json({ error: 'Name and password required' });
   if (trimmed.length > 30) return res.status(400).json({ error: 'Name too long (max 30 characters)' });
-  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (typeof password !== 'string' || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (password.length > MAX_PASSWORD) return res.status(400).json({ error: `Password too long (max ${MAX_PASSWORD} characters)` });
 
   const VALID_PLATFORMS = ['spotify', 'appleMusic', 'youtubeMusic', 'amazonMusic', 'tidal', 'deezer'];
   const platform = VALID_PLATFORMS.includes(preferredPlatform) ? preferredPlatform : 'spotify';
@@ -492,6 +579,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
      VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(id), 0) FROM announcements))`,
     [trimmed, passwordHash, code, platform]
   );
+  await regenerateSession(req);
   req.session.user = { name: trimmed };
   if (ref === 'invite' || ref === 'share') countEvent(`signup_${ref}`);
   res.status(201).json({ name: trimmed });
@@ -499,10 +587,16 @@ app.post('/api/register', authLimiter, async (req, res) => {
 
 app.post('/api/login', authLimiter, async (req, res) => {
   const { name, password } = req.body;
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD) return res.status(401).json({ error: 'Invalid username or password' });
   const { rows } = await pool.query('SELECT * FROM users WHERE LOWER(name) = LOWER($1)', [name]);
-  if (rows.length === 0) return res.status(401).json({ error: 'Invalid username or password' });
+  if (rows.length === 0) {
+    // Compare anyway so a missing account can't be told apart by response time
+    await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
   const valid = await bcrypt.compare(password, rows[0].password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
+  await regenerateSession(req);
   req.session.user = { name: rows[0].name };
   res.json(req.session.user);
 });
@@ -528,7 +622,9 @@ app.patch('/api/me/preferred-platform', requireAuth, async (req, res) => {
 app.patch('/api/me/password', requireAuth, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both fields required' });
-  if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  if (typeof currentPassword !== 'string' || currentPassword.length > MAX_PASSWORD) return res.status(401).json({ error: 'Current password is incorrect' });
+  if (typeof newPassword !== 'string' || newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  if (newPassword.length > MAX_PASSWORD) return res.status(400).json({ error: `New password too long (max ${MAX_PASSWORD} characters)` });
   const { rows } = await pool.query('SELECT password_hash FROM users WHERE name = $1', [req.session.user.name]);
   const valid = await bcrypt.compare(currentPassword, rows[0].password_hash);
   if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
@@ -555,6 +651,7 @@ app.delete('/api/me', requireAuth, authLimiter, async (req, res) => {
   const name = req.session.user.name;
   const { password } = req.body ?? {};
   if (!password) return res.status(400).json({ error: 'Enter your password to confirm' });
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD) return res.status(401).json({ error: 'Password is incorrect' });
   const { rows: me } = await pool.query('SELECT id, password_hash, is_admin FROM users WHERE name = $1', [name]);
   if (me.length === 0) return res.status(404).json({ error: 'Account not found' });
   if (!(await bcrypt.compare(password, me[0].password_hash))) return res.status(401).json({ error: 'Password is incorrect' });
@@ -927,7 +1024,7 @@ app.get('/api/shares/:id', async (req, res) => {
 
 // Add a friend by code (typed or from an invite link): sends a request the
 // other person accepts. If they already asked you, this accepts theirs.
-app.post('/api/friends/add', requireAuth, async (req, res) => {
+app.post('/api/friends/add', requireAuth, perUserLimit(friendAddLimiter), async (req, res) => {
   const { friendCode, via, shareId } = req.body;
   if (!friendCode) return res.status(400).json({ error: 'Friend code required' });
 
@@ -1332,9 +1429,10 @@ app.post('/api/songs/:id/rating', requireAuth, async (req, res) => {
 });
 
 // Current song from the other person in a friendship
-app.get('/api/friends/:id/current-song', requireAuth, (req, res) => {
+app.get('/api/friends/:id/current-song', requireAuth, async (req, res) => {
   const myName = req.session.user.name;
-  const fid = parseInt(req.params.id);
+  if (!(await isFriendshipMember(myName, req.params.id))) return res.status(403).json({ error: 'Forbidden' });
+  const fid = Number(req.params.id);
   const songs = lastSentByFriendship[fid] || {};
   const other = Object.entries(songs).find(([name]) => name !== myName);
   res.json(other ? other[1] : null);
@@ -1913,7 +2011,7 @@ const resolveSong = async (link) => {
   }
 };
 
-app.post('/api/verify', requireAuth, async (req, res) => {
+app.post('/api/verify', requireAuth, perUserLimit(verifyLimiter), async (req, res) => {
   const result = await resolveSong(req.body?.link);
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result);

@@ -1,3 +1,10 @@
+// Defense in depth: song links ultimately come from other users, so never
+// navigate to anything but a real web URL or a known music-app-scheme URI.
+// This keeps a javascript:/data: URL from running in the opener's page.
+const isWebUrl = (u) => { try { return /^https?:$/.test(new URL(u).protocol); } catch { return false; } };
+const APP_URI_RE = /^(?:spotify:|music:|tidal:\/\/|deezer:\/\/|youtubemusic:\/\/)/i;
+const isAppUri = (u) => typeof u === 'string' && APP_URI_RE.test(u);
+
 // Music platforms the app can open songs in, in display order
 export const PLATFORMS = [
   ['spotify', 'Spotify'], ['appleMusic', 'Apple Music'], ['youtubeMusic', 'YouTube Music'],
@@ -42,6 +49,7 @@ const isIOSInstalled = () => navigator.standalone === true;
 // link switches to the app directly. If nothing took us away (Spotify not
 // installed), go to the web link instead.
 const openAppWithWebFallback = (appUri, webUrl) => {
+  if (!isAppUri(appUri)) return openWeb(webUrl);
   let left = false;
   const onLeave = () => { left = true; };
   const onVisibility = () => { if (document.visibilityState === 'hidden') left = true; };
@@ -53,7 +61,7 @@ const openAppWithWebFallback = (appUri, webUrl) => {
     window.removeEventListener('pagehide', onLeave);
     window.removeEventListener('blur', onLeave);
     document.removeEventListener('visibilitychange', onVisibility);
-    if (!left && document.visibilityState === 'visible' && webUrl) window.location.href = webUrl;
+    if (!left && document.visibilityState === 'visible' && isWebUrl(webUrl)) window.location.href = webUrl;
   }, 1500);
 };
 
@@ -74,7 +82,7 @@ const openWebClosingOnReturn = (url) => {
 };
 
 const openWeb = (url) => {
-  if (!url) return;
+  if (!isWebUrl(url)) return;
   if (isIOSInstalled()) openWebClosingOnReturn(url);
   else window.open(url, '_blank');
 };
@@ -94,7 +102,7 @@ export const openSpotify = (webUrl, appUri) => {
   }
   // No web fallback: the page can't tell the app opening from the browser's
   // own "choose an app" dialog, so a fallback would open Spotify twice.
-  if (appUri && !isPhone() && getSpotifyOpen() === 'app') {
+  if (isAppUri(appUri) && !isPhone() && getSpotifyOpen() === 'app') {
     window.location.href = appUri;
     return;
   }
