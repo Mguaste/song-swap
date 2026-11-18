@@ -1,4 +1,5 @@
 import './App.css';
+import icon from './assets/SSLogo.png';
 import { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import { BASE_TITLE, setFaviconPip } from './lib/favicon';
@@ -823,12 +824,17 @@ function App() {
               onOpenSidebar={() => setSidebarOpen(true)}
             />
           ) : !activeFriendship && !showDashboard ? (
-            pendingShare ? (
-              <div className="dash-card dash-share">
-                <p>Pick a friend to send the song you shared</p>
-                <button className="link-btn" onClick={cancelShare}>Cancel</button>
-              </div>
-            ) : null
+            <div id="empty-state">
+              <img src={icon} id="empty-logo" alt="" />
+              {pendingShare ? (
+                <>
+                  <p>Pick a friend to send the song you shared</p>
+                  <button className="link-btn" onClick={cancelShare}>Cancel</button>
+                </>
+              ) : (
+                <p>Select a friend to start swapping songs</p>
+              )}
+            </div>
           ) : !activeFriendship ? (
             <Dashboard
               user={user}
