@@ -63,6 +63,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [preferredPlatform, setPreferredPlatform] = useState('spotify');
+  const [showDashboard, setShowDashboard] = useState(true);
   // Song confirmed missing on the preferred service: { song, platformLinks }
   const [notFoundChoice, setNotFoundChoice] = useState(null);
   const [memoTick, setMemoTick] = useState(0); // bumped when the admin posts a memo
@@ -78,6 +79,7 @@ function App() {
       const data = await r.json();
       setUser(data);
       setPreferredPlatform(data.preferred_platform ?? 'spotify');
+      setShowDashboard(data.show_dashboard ?? true);
     } else {
       setUser(null);
     }
@@ -495,6 +497,16 @@ function App() {
     });
   };
 
+  const changeShowDashboard = (show) => {
+    setShowDashboard(show);
+    fetch('/api/me/show-dashboard', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ show }),
+    });
+  };
+
   const cancelShare = () => { pendingShareRef.current = null; setPendingShare(null); clearPendingShare(); };
 
   // The Admin button opens the dedicated admin page
@@ -783,6 +795,7 @@ function App() {
           unread={unreadFriendships}
           onSelectFriend={selectFriend}
           onDashboard={goHome}
+          showDashboard={showDashboard}
           dashboardActive={!activeFriendship && !showSettings && !showAdmin}
         />
 
@@ -796,6 +809,8 @@ function App() {
               onProfileChanged={loadMe}
               preferredPlatform={preferredPlatform}
               onPlatformChange={changePlatform}
+              showDashboard={showDashboard}
+              onShowDashboardChange={changeShowDashboard}
               onAccountDeleted={clearSession}
             />
           ) : !activeFriendship && friends.length === 0 ? (
@@ -807,6 +822,13 @@ function App() {
               friendRequests={friendRequests}
               onOpenSidebar={() => setSidebarOpen(true)}
             />
+          ) : !activeFriendship && !showDashboard ? (
+            pendingShare ? (
+              <div className="dash-card dash-share">
+                <p>Pick a friend to send the song you shared</p>
+                <button className="link-btn" onClick={cancelShare}>Cancel</button>
+              </div>
+            ) : null
           ) : !activeFriendship ? (
             <Dashboard
               user={user}

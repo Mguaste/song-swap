@@ -82,6 +82,7 @@ const initDb = async () => {
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS source_url TEXT');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS odesli_page_url TEXT');
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_platform TEXT DEFAULT 'spotify'");
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS show_dashboard BOOLEAN NOT NULL DEFAULT TRUE');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE');
   // 1–5 rating, set only by the friend who received the song
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating BETWEEN 1 AND 5)');
@@ -633,7 +634,7 @@ app.post('/api/login', authLimiter, async (req, res) => {
 app.get('/api/me', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT u.id, u.name, u.friend_code, COALESCE(u.preferred_platform, 'spotify') AS preferred_platform, u.is_admin,
-       u.name_changed_at, a.updated_at AS avatar_at
+       u.show_dashboard, u.name_changed_at, a.updated_at AS avatar_at
      FROM users u LEFT JOIN user_avatars a ON a.user_id = u.id WHERE u.name = $1`,
     [req.session.user.name]
   );
@@ -646,6 +647,13 @@ app.patch('/api/me/preferred-platform', requireAuth, async (req, res) => {
   if (!VALID.includes(platform)) return res.status(400).json({ error: 'Invalid platform' });
   await pool.query('UPDATE users SET preferred_platform = $1 WHERE name = $2', [platform, req.session.user.name]);
   res.json({ preferred_platform: platform });
+});
+
+app.patch('/api/me/show-dashboard', requireAuth, async (req, res) => {
+  const { show } = req.body;
+  if (typeof show !== 'boolean') return res.status(400).json({ error: 'Invalid value' });
+  await pool.query('UPDATE users SET show_dashboard = $1 WHERE name = $2', [show, req.session.user.name]);
+  res.json({ show_dashboard: show });
 });
 
 app.patch('/api/me/password', requireAuth, async (req, res) => {

@@ -6,7 +6,7 @@ export function Sidebar({
   addCode, onAddCodeChange, onAddFriend, addCodeError, addCodeSuccess,
   friendRequests, sentRequests, onAccept, onDecline, onBlockRequest,
   friends, activeFriendshipId, unread, onSelectFriend,
-  onDashboard, dashboardActive,
+  onDashboard, dashboardActive, showDashboard = true,
 }) {
   const sorted = [...friends].sort((a, b) => new Date(b.last_activity || 0) - new Date(a.last_activity || 0));
   return (
@@ -78,7 +78,7 @@ export function Sidebar({
           )}
 
           <div className="sidebar-section sidebar-friends">
-            <div
+            {showDashboard && <div
               className={`friend-item dashboard-item${dashboardActive ? ' active' : ''}`}
               onClick={onDashboard}
               role="button"
@@ -89,7 +89,7 @@ export function Sidebar({
                 </svg>
               </span>
               <span className="friend-name">Dashboard</span>
-            </div>
+            </div>}
             <p className="sidebar-label">Friends</p>
             {friends.length === 0 ? (
               <p className="empty-msg">No friends yet</p>

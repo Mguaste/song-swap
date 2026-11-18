@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { PLATFORMS, isPhone, getSpotifyOpen, setSpotifyOpen } from '../../lib/platforms';
 
 
-export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform, onPlatformChange, onAccountDeleted }) {
+export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform, onPlatformChange, showDashboard, onShowDashboardChange, onAccountDeleted }) {
   const [spotifyOpen, setSpotifyOpenState] = useState(getSpotifyOpen);
   const changeSpotifyOpen = (value) => { setSpotifyOpen(value); setSpotifyOpenState(value); };
 
@@ -24,6 +24,21 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
         <div className="settings-row">
           <label className="settings-label">Change Password</label>
           <ChangePassword />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h2 className="settings-section-title">Home</h2>
+        <div className="settings-row">
+          <label className="settings-label">Dashboard</label>
+          <div className="settings-password-form">
+            <p className="settings-hint">
+              {showDashboard ? 'Your home page shows the dashboard.' : 'The dashboard is off. Your home page stays blank.'}
+            </p>
+            <button className="settings-save-btn" onClick={() => onShowDashboardChange(!showDashboard)}>
+              {showDashboard ? 'Turn Off' : 'Turn On Dashboard'}
+            </button>
+          </div>
         </div>
       </div>
 
