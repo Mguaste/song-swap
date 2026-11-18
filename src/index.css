@@ -11,8 +11,8 @@ html, body { overflow-x: hidden; }
 
 body {
   margin: 0;
-  background: #121212;
-  color: #fff;
+  background: var(--g-12);
+  color: var(--g-ff);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }

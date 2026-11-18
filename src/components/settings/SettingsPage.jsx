@@ -6,11 +6,14 @@ import { BlockedUsers } from './BlockedUsers';
 import { NotificationSettings } from './NotificationSettings';
 import { useState } from 'react';
 import { PLATFORMS, isPhone, getSpotifyOpen, setSpotifyOpen } from '../../lib/platforms';
+import { getThemeChoice, setThemeChoice } from '../../lib/theme';
 
 
 export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform, onPlatformChange, showDashboard, onShowDashboardChange, onAccountDeleted }) {
   const [spotifyOpen, setSpotifyOpenState] = useState(getSpotifyOpen);
   const changeSpotifyOpen = (value) => { setSpotifyOpen(value); setSpotifyOpenState(value); };
+  const [theme, setTheme] = useState(getThemeChoice);
+  const changeTheme = (value) => { setThemeChoice(value); setTheme(value); };
 
   return (
     <div id="settings-page">
@@ -24,6 +27,21 @@ export function SettingsPage({ user, onBack, onProfileChanged, preferredPlatform
         <div className="settings-row">
           <label className="settings-label">Change Password</label>
           <ChangePassword />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h2 className="settings-section-title">Appearance</h2>
+        <div className="settings-row">
+          <label className="settings-label">Theme</label>
+          <div className="settings-password-form">
+            <select className="platform-select" value={theme} onChange={e => changeTheme(e.target.value)}>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="system">Match device</option>
+            </select>
+            <p className="settings-hint">Saved on this device.</p>
+          </div>
         </div>
       </div>
 

@@ -56,6 +56,13 @@
     }
     </script>
     <meta name="theme-color" content="#10B981" />
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+      } catch (e) { document.documentElement.dataset.theme = 'dark'; }
+    </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
