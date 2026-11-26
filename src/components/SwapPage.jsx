@@ -58,7 +58,7 @@ export function SwapPage({
             <h3>{songDetails ? songDetails.title : 'Song Title'}</h3>
             <p>Artist: {songDetails ? songDetails.artist : 'Artist Name'}</p>
             <p>Album: {songDetails ? songDetails.album : 'Album Name'}</p>
-            {songDetails?.id && (
+            {songDetails?.id && !songDetails.imported && (
               <p className="card-rating">
                 {songDetails.rating
                   ? <>{friendship.friend_name} rated it <StarRating value={songDetails.rating} /></>
@@ -103,7 +103,7 @@ export function SwapPage({
             <h3>{receivedSong ? receivedSong.title : 'Song Title'}</h3>
             <p>Artist: {receivedSong ? receivedSong.artist : 'Artist Name'}</p>
             <p>Album: {receivedSong ? receivedSong.album : 'Album Name'}</p>
-            {receivedSong?.id && (
+            {receivedSong?.id && !receivedSong.imported && (
               <div className="card-rating">
                 <StarRating value={receivedSong.rating} onRate={n => onRate(receivedSong, n)} className="large" />
                 <span className="rating-pending">{receivedSong.rating ? 'Your rating' : 'Rate this song'}</span>
@@ -125,7 +125,7 @@ export function SwapPage({
                   <span className="history-song">{entry.title}</span>
                   <span className="history-meta">{entry.artist} · {entry.sentBy} · {new Date(entry.sentAt).toLocaleDateString()}</span>
                 </div>
-                {entry.id && (entry.sentBy === user.name
+                {entry.id && !entry.imported && (entry.sentBy === user.name
                   ? <StarRating value={entry.rating} className="history-stars" />
                   : <StarRating value={entry.rating} onRate={n => onRate(entry, n)} className="history-stars" />)}
               </div>

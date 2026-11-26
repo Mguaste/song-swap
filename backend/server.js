@@ -32,7 +32,7 @@ const rowToEntry = (r) => ({
   albumArt: r.album_art, spotifyUri: r.spotify_uri, spotifyUrl: r.spotify_url,
   platformLinks: r.platform_links ?? null, sourceUrl: r.source_url ?? null,
   odesliPageUrl: r.odesli_page_url ?? null, sentBy: r.sent_by, sentAt: r.sent_at,
-  friendshipId: r.friendship_id, rating: r.rating ?? null,
+  friendshipId: r.friendship_id, rating: r.rating ?? null, imported: !!r.imported,
 });
 
 const generateFriendCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -87,6 +87,8 @@ const initDb = async () => {
   // 1–5 rating, set only by the friend who received the song
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating BETWEEN 1 AND 5)');
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ');
+  // Backfilled from an admin CSV import: counts for duplicate checks but can't be rated
+  await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS imported BOOLEAN NOT NULL DEFAULT FALSE');
   // Profile pictures (small JPEG/PNG/WebP, resized in the browser before upload)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_avatars (
@@ -1542,7 +1544,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     pool.query(
       `WITH mine AS (${mine})
        SELECT sh.*, m.friend_name FROM song_history sh JOIN mine m ON m.id = sh.friendship_id
-       WHERE sh.sent_by != $2 AND sh.rating IS NULL
+       WHERE sh.sent_by != $2 AND sh.rating IS NULL AND NOT sh.imported
        ORDER BY sh.sent_at DESC LIMIT 5`,
       [uid, name]
     ),
@@ -1635,7 +1637,7 @@ app.post('/api/songs/:id/rating', requireAuth, async (req, res) => {
      FROM friendships f
      JOIN users u ON u.id = f.requester_id OR u.id = f.receiver_id
      WHERE sh.id = $2 AND f.id = sh.friendship_id AND f.status = 'accepted'
-       AND u.name = $3 AND sh.sent_by <> $3
+       AND u.name = $3 AND sh.sent_by <> $3 AND NOT sh.imported
      RETURNING sh.id, sh.friendship_id, sh.sent_by, sh.rating`,
     [rating, id, me]
   );
@@ -1750,7 +1752,7 @@ const IMPORT_CONCURRENCY = 3;
 const importJobs = new Map(); // id → job (in memory; admin-only, short-lived)
 
 const parseCsv = (text) => {
-  text = text.replace(/^﻿/, '');
+  text = text.replace(/^\uFEFF/, '');
   const rows = [];
   let row = [], field = '', quoted = false;
   for (let i = 0; i < text.length; i++) {
@@ -1863,8 +1865,8 @@ const runHistoryImport = async (job, entries) => {
         await client.query(
           `INSERT INTO song_history
             (title, artist, album, album_art, spotify_uri, spotify_url,
-             platform_links, source_url, odesli_page_url, sent_by, friendship_id, sent_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+             platform_links, source_url, odesli_page_url, sent_by, friendship_id, sent_at, imported)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE)`,
           [s.title, s.artist, s.album, s.albumArt, s.spotifyUri ?? null, s.spotifyUrl ?? null,
            s.platformLinks ? JSON.stringify(s.platformLinks) : null, s.sourceUrl ?? null,
            s.odesliPageUrl ?? null, e.senderName, friendshipId, e.sentAt]
@@ -2531,7 +2533,7 @@ initDb().then(async () => {
   // last midnight reset count; older ones were already cleared.
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (sent_by, friendship_id) * FROM song_history
-     WHERE sent_at >= (date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1)
+     WHERE sent_at >= (date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1) AND NOT imported
      ORDER BY sent_by, friendship_id, sent_at DESC`,
     [RESET_TIMEZONE]
   );
