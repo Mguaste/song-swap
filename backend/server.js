@@ -1743,7 +1743,8 @@ app.delete('/api/admin/history', requireAdmin, async (req, res) => {
 // ── History import (admin) ──
 // Backfill song_history from a CSV of past swaps, one song per row:
 //   date, sender, receiver, link
-// A header row is optional (columns are then matched by name). Each link is
+// A header row is optional; with one, columns can be in any order and are
+// matched by name (e.g. to, from, links, dateTime). Each link is
 // looked up like a normal send. Duplicates (same check as send-song) are
 // resolved per friendship with the OLDEST copy winning: within the CSV the
 // earliest row is kept; against the site, an older-or-equal site copy wins and
@@ -1777,13 +1778,14 @@ const parseCsv = (text) => {
 
 // Column positions: from a header row if there is one, else the default order
 const IMPORT_HEADER_NAMES = {
-  date: ['date', 'sent_at', 'sentat', 'sent', 'time', 'timestamp'],
-  sender: ['sender', 'from', 'sent_by', 'sentby'],
+  date: ['date', 'datetime', 'sentat', 'sent', 'time', 'timestamp'],
+  sender: ['sender', 'from', 'sentby'],
   receiver: ['receiver', 'to', 'recipient'],
-  link: ['link', 'url', 'song', 'song_link'],
+  link: ['link', 'links', 'url', 'song', 'songlink'],
 };
 const importColumns = (first) => {
-  const lower = first.map(f => f.toLowerCase().replace(/\s+/g, '_'));
+  // "dateTime", "Date Time" and "date_time" all count as datetime
+  const lower = first.map(f => f.toLowerCase().replace(/[^a-z]/g, ''));
   const found = {};
   for (const [col, names] of Object.entries(IMPORT_HEADER_NAMES)) {
     const i = lower.findIndex(f => names.includes(f));

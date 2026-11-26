@@ -48,8 +48,8 @@ export function AdminImportHistory() {
   return (
     <div className="settings-password-form">
       <p className="settings-hint">
-        CSV columns: <code>date, sender, receiver, link</code> (header row optional). Dates without a
-        time zone use the app's time zone. When a song is already in that pair's history, the older copy wins.
+        CSV with a header row naming the columns, in any order: <code>to, from, links, dateTime</code>{' '}
+        (or <code>receiver, sender, link, date</code>). Times without a time zone use the app's time zone. When a song is already in that pair's history, the older copy wins.
       </p>
       <input ref={inputRef} type="file" accept=".csv,text/csv" disabled={running}
         onChange={e => { setFile(e.target.files?.[0] ?? null); setError(''); }} />
