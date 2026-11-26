@@ -89,6 +89,9 @@ const initDb = async () => {
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ');
   // Backfilled from an admin CSV import: counts for duplicate checks but can't be rated
   await pool.query('ALTER TABLE song_history ADD COLUMN IF NOT EXISTS imported BOOLEAN NOT NULL DEFAULT FALSE');
+  // One-time: the first test import (2026-11-25) ran before this column existed
+  await pool.query(`UPDATE song_history SET imported = TRUE, rating = NULL, rated_at = NULL
+    WHERE id IN (91, 92, 93) AND friendship_id = 17 AND NOT imported`);
   // Profile pictures (small JPEG/PNG/WebP, resized in the browser before upload)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_avatars (
