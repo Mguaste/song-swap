@@ -1735,6 +1735,257 @@ app.delete('/api/admin/history', requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+// ── History import (admin) ──
+// Backfill song_history from a CSV of past swaps, one song per row:
+//   date, sender, receiver, link
+// A header row is optional (columns are then matched by name). Each link is
+// looked up like a normal send. Duplicates (same check as send-song) are
+// resolved per friendship with the OLDEST copy winning: within the CSV the
+// earliest row is kept; against the site, an older-or-equal site copy wins and
+// the CSV row is skipped, otherwise the newer site copy is replaced. Re-running
+// the same CSV is therefore a no-op. Lookups are slow, so the import runs as a
+// background job the admin page polls.
+const IMPORT_MAX_ROWS = 1000;
+const IMPORT_CONCURRENCY = 3;
+const importJobs = new Map(); // id → job (in memory; admin-only, short-lived)
+
+const parseCsv = (text) => {
+  text = text.replace(/^﻿/, '');
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false;
+      } else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = '';
+    } else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows.map(r => r.map(f => f.trim()));
+};
+
+// Column positions: from a header row if there is one, else the default order
+const IMPORT_HEADER_NAMES = {
+  date: ['date', 'sent_at', 'sentat', 'sent', 'time', 'timestamp'],
+  sender: ['sender', 'from', 'sent_by', 'sentby'],
+  receiver: ['receiver', 'to', 'recipient'],
+  link: ['link', 'url', 'song', 'song_link'],
+};
+const importColumns = (first) => {
+  const lower = first.map(f => f.toLowerCase().replace(/\s+/g, '_'));
+  const found = {};
+  for (const [col, names] of Object.entries(IMPORT_HEADER_NAMES)) {
+    const i = lower.findIndex(f => names.includes(f));
+    if (i !== -1) found[col] = i;
+  }
+  if (Object.keys(found).length === 4) return { header: true, cols: found };
+  return { header: false, cols: { date: 0, sender: 1, receiver: 2, link: 3 } };
+};
+
+// Same identity rules as the send-song duplicate check
+const songKeys = (s) => [
+  s.odesliPageUrl && `o:${s.odesliPageUrl}`,
+  s.spotifyUri && `u:${s.spotifyUri}`,
+  `t:${(s.title ?? '').toLowerCase()}\u0000${(s.artist ?? '').toLowerCase()}`,
+].filter(Boolean);
+
+const runHistoryImport = async (job, entries) => {
+  // 1. Look up each distinct link (a few at a time, one retry on server errors)
+  const lookups = new Map();
+  const links = [...new Set(entries.map(e => e.link))];
+  let next = 0;
+  const worker = async () => {
+    while (next < links.length) {
+      const link = links[next++];
+      let result = await resolveSong(link);
+      if (result.error && result.status >= 500) result = await resolveSong(link);
+      lookups.set(link, result);
+      job.processed += entries.filter(e => e.link === link).length;
+    }
+  };
+  await Promise.all(Array.from({ length: IMPORT_CONCURRENCY }, worker));
+
+  // 2. Per friendship, oldest first
+  const byFriendship = new Map();
+  for (const e of entries) {
+    const song = lookups.get(e.link);
+    if (song.error) { e.report.status = 'failed'; e.report.message = song.error; continue; }
+    e.song = song;
+    e.report.title = song.title;
+    e.report.artist = song.artist;
+    if (!byFriendship.has(e.friendshipId)) byFriendship.set(e.friendshipId, []);
+    byFriendship.get(e.friendshipId).push(e);
+  }
+
+  for (const [friendshipId, list] of byFriendship) {
+    list.sort((a, b) => a.sentAt - b.sentAt || a.report.row - b.report.row);
+    const seen = new Map(); // song key → row number of the kept CSV row
+    const deletedHere = [];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const e of list) {
+        const keys = songKeys(e.song);
+        const earlier = keys.map(k => seen.get(k)).find(Boolean);
+        if (earlier) {
+          e.report.status = 'skipped';
+          e.report.message = `Duplicate of an older CSV row (row ${earlier})`;
+          continue;
+        }
+        keys.forEach(k => seen.set(k, e.report.row));
+
+        const { rows: dups } = await client.query(
+          `SELECT id, sent_at FROM song_history WHERE friendship_id = $1
+           AND (
+             ($2::text IS NOT NULL AND odesli_page_url = $2)
+             OR ($3::text IS NOT NULL AND spotify_uri = $3)
+             OR (LOWER(title) = LOWER($4) AND LOWER(artist) = LOWER($5))
+           )`,
+          [friendshipId, e.song.odesliPageUrl ?? null, e.song.spotifyUri ?? null, e.song.title ?? '', e.song.artist ?? '']
+        );
+        const older = dups.find(d => d.sent_at <= e.sentAt);
+        if (older) {
+          e.report.status = 'skipped';
+          e.report.message = `Already in history from ${older.sent_at.toISOString().slice(0, 10)}`;
+          continue;
+        }
+        if (dups.length > 0) {
+          await client.query('DELETE FROM song_history WHERE id = ANY($1)', [dups.map(d => d.id)]);
+          deletedHere.push(...dups.map(d => d.id));
+        }
+        const s = e.song;
+        await client.query(
+          `INSERT INTO song_history
+            (title, artist, album, album_art, spotify_uri, spotify_url,
+             platform_links, source_url, odesli_page_url, sent_by, friendship_id, sent_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [s.title, s.artist, s.album, s.albumArt, s.spotifyUri ?? null, s.spotifyUrl ?? null,
+           s.platformLinks ? JSON.stringify(s.platformLinks) : null, s.sourceUrl ?? null,
+           s.odesliPageUrl ?? null, e.senderName, friendshipId, e.sentAt]
+        );
+        e.report.status = dups.length > 0 ? 'replaced' : 'added';
+        if (dups.length > 0) e.report.message = `Replaced a newer copy already in history`;
+      }
+      await client.query('COMMIT');
+      job.deletedIds.push(...deletedHere);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('history import failed for friendship', friendshipId, err);
+      for (const e of list) {
+        if (['added', 'replaced'].includes(e.report.status) || !e.report.status) {
+          e.report.status = 'failed';
+          e.report.message = 'Database error — nothing from this friendship was imported';
+        }
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  // Replaced rows may have been someone's current song for today
+  const deleted = new Set(job.deletedIds);
+  for (const songs of Object.values(lastSentByFriendship)) {
+    for (const [name, entry] of Object.entries(songs)) if (deleted.has(entry.id)) delete songs[name];
+  }
+};
+
+app.post('/api/admin/history/import', requireAdmin,
+  express.text({ type: ['text/csv', 'text/plain'], limit: '2mb' }), async (req, res) => {
+  if ([...importJobs.values()].some(j => j.status === 'running')) {
+    return res.status(409).json({ error: 'An import is already running — wait for it to finish' });
+  }
+  if (typeof req.body !== 'string' || !req.body.trim()) return res.status(400).json({ error: 'Upload a CSV file' });
+
+  const csv = parseCsv(req.body);
+  const numbered = csv.map((fields, i) => ({ fields, row: i + 1 })).filter(r => r.fields.some(Boolean));
+  if (numbered.length === 0) return res.status(400).json({ error: 'That CSV is empty' });
+  const { header, cols } = importColumns(numbered[0].fields);
+  const dataRows = header ? numbered.slice(1) : numbered;
+  if (dataRows.length === 0) return res.status(400).json({ error: 'That CSV has no rows after the header' });
+  if (dataRows.length > IMPORT_MAX_ROWS) {
+    return res.status(400).json({ error: `Too many rows (${dataRows.length}) — split it into files of ${IMPORT_MAX_ROWS} or fewer` });
+  }
+
+  // Users and their accepted friendships, looked up once
+  const names = [...new Set(dataRows.flatMap(r => [r.fields[cols.sender], r.fields[cols.receiver]])
+    .filter(Boolean).map(n => n.toLowerCase()))];
+  const { rows: users } = await pool.query('SELECT id, name FROM users WHERE LOWER(name) = ANY($1)', [names]);
+  const userByName = new Map(users.map(u => [u.name.toLowerCase(), u]));
+  const { rows: friendships } = await pool.query(
+    `SELECT id, requester_id, receiver_id FROM friendships
+     WHERE status = 'accepted' AND requester_id = ANY($1) AND receiver_id = ANY($1)`,
+    [users.map(u => u.id)]
+  );
+  const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+  const friendshipByPair = new Map(friendships.map(f => [pairKey(f.requester_id, f.receiver_id), f.id]));
+
+  const reports = [];
+  const entries = [];
+  for (const { fields, row } of dataRows) {
+    const date = fields[cols.date] ?? '', sender = fields[cols.sender] ?? '';
+    const receiver = fields[cols.receiver] ?? '', link = fields[cols.link] ?? '';
+    const report = { row, date, sender, receiver, link };
+    reports.push(report);
+    const fail = (message) => { report.status = 'failed'; report.message = message; };
+
+    if (!date || !sender || !receiver || !link) { fail('Missing a column (need date, sender, receiver, link)'); continue; }
+    const from = userByName.get(sender.toLowerCase());
+    const to = userByName.get(receiver.toLowerCase());
+    if (!from) { fail(`No user named "${sender}"`); continue; }
+    if (!to) { fail(`No user named "${receiver}"`); continue; }
+    if (from.id === to.id) { fail('Sender and receiver are the same person'); continue; }
+    const friendshipId = friendshipByPair.get(pairKey(from.id, to.id));
+    if (!friendshipId) { fail(`${from.name} and ${to.name} aren't friends`); continue; }
+
+    // Dates without a time zone are read in the app's time zone
+    let sentAt;
+    try {
+      const hasZone = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(date) && /\d[T ]\d/.test(date);
+      const { rows } = await pool.query(
+        hasZone ? 'SELECT $1::timestamptz AS t' : 'SELECT ($1::timestamp AT TIME ZONE $2) AS t',
+        hasZone ? [date] : [date, RESET_TIMEZONE]
+      );
+      sentAt = rows[0].t;
+    } catch { fail(`Can't read the date "${date}"`); continue; }
+    if (!sentAt || sentAt > new Date()) { fail('Date is in the future'); continue; }
+
+    entries.push({ report, link, sentAt, senderName: from.name, friendshipId });
+  }
+
+  const id = crypto.randomBytes(8).toString('hex');
+  const job = {
+    id, status: 'running', total: entries.length, processed: 0, rows: reports,
+    deletedIds: [], startedAt: new Date(),
+  };
+  importJobs.set(id, job);
+  // Keep only the last few finished jobs
+  for (const [jid, j] of importJobs) if (importJobs.size > 5 && j.status !== 'running') importJobs.delete(jid);
+
+  runHistoryImport(job, entries)
+    .then(() => { job.status = 'done'; })
+    .catch(err => { console.error('history import crashed:', err); job.status = 'failed'; job.error = 'Import crashed — check the server logs'; })
+    .finally(() => { job.finishedAt = new Date(); });
+
+  res.status(202).json({ id });
+});
+
+app.get('/api/admin/history/import/:id', requireAdmin, (req, res) => {
+  const job = importJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Import not found (the server may have restarted)' });
+  const summary = { added: 0, replaced: 0, skipped: 0, failed: 0 };
+  for (const r of job.rows) if (summary[r.status] !== undefined) summary[r.status]++;
+  res.json({
+    status: job.status, error: job.error ?? null, total: job.total, processed: job.processed,
+    summary, rows: job.status === 'running' ? [] : job.rows,
+  });
+});
+
 app.delete('/api/admin/current-song', requireAdmin, (req, res) => {
   clearLastSent();
   io.emit('all-songs-cleared');

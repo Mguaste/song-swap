@@ -3,6 +3,7 @@ import { AdminAnnouncements } from './settings/AdminAnnouncements';
 import { AdminResetPassword } from './settings/AdminResetPassword';
 import { AdminReports } from './settings/AdminReports';
 import { AdminShares } from './settings/AdminShares';
+import { AdminImportHistory } from './settings/AdminImportHistory';
 
 // Admin tools as their own page (reached from the Admin button in the header)
 export function AdminPage({ onBack }) {
@@ -29,6 +30,11 @@ export function AdminPage({ onBack }) {
       <div className="settings-section">
         <h2 className="settings-section-title">Song Links</h2>
         <AdminShares />
+      </div>
+
+      <div className="settings-section">
+        <h2 className="settings-section-title">Import History</h2>
+        <AdminImportHistory />
       </div>
 
       <div className="settings-section">
